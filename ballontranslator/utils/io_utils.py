@@ -1,8 +1,7 @@
 import json, os, sys, time, io
 import os.path as osp
 from pathlib import Path
-import importlib
-from typing import List, Dict, Callable, Union
+from typing import List, Union
 import base64
 import traceback
 
@@ -44,6 +43,9 @@ def json_dump_nested_obj(obj, **kwargs):
     def _default(obj):
         if isinstance(obj, (np.ndarray, np.ScalarType)):
             return serialize_np(obj)
+        serializer = getattr(obj, 'to_serializable_dict', None)
+        if serializer is not None:
+            return serializer()
         return obj.__dict__
     return json.dumps(obj, default=lambda o: _default(o), ensure_ascii=False, **kwargs)
 
@@ -166,6 +168,8 @@ def imread(imgpath, read_type=cv2.IMREAD_COLOR, max_retry_limit=5, retry_interva
             elif img.mode == 'LA':
                 # grayscale + alpha (2-channel) isn't handled below; promote to RGBA
                 img = img.convert('RGBA')
+            elif img.mode == '1':
+                img = img.convert('RGBA' if 'transparency' in img.info else 'RGB')
             if read_type == cv2.IMREAD_GRAYSCALE:
                 img = img.convert('L')
             img = np.array(img)
@@ -249,36 +253,6 @@ def text_is_empty(text) -> bool:
     
 def empty_func(*args, **kwargs):
     return
-
-def get_obj_from_str(string, reload=False):
-    module, cls = string.rsplit(".", 1)
-    if reload:
-        module_imp = importlib.import_module(module)
-        importlib.reload(module_imp)
-    return getattr(importlib.import_module(module, package=None), cls)
-
-def get_module_from_str(module_str: str):
-    return importlib.import_module(module_str, package=None)
-
-def build_funcmap(module_str: str, params_names: List[str], func_prefix: str = '', func_suffix: str = '', fallback_func: Callable = None, verbose: bool = True) -> Dict:
-    
-    if fallback_func is None:
-        fallback_func = empty_func
-
-    module = get_module_from_str(module_str)
-
-    funcmap = {}
-    for param in params_names:
-        tgt_func = f'{func_prefix}{param}{func_suffix}'
-        try:
-            tgt_func = getattr(module, tgt_func)
-        except Exception as e:
-            if verbose:
-                print(f'failed to import {tgt_func} from {module_str}: {e}')
-            tgt_func = fallback_func
-        funcmap[param] = tgt_func
-
-    return funcmap
 
 def _b64encode(x: bytes) -> str:
     return base64.b64encode(x).decode("utf-8")

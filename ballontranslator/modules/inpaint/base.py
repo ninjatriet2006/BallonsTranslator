@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
 from typing import List
-from collections import OrderedDict
 
 from ballontranslator.utils.registry import Registry
 from ballontranslator.utils.textblock_mask import extract_ballon_mask
@@ -75,10 +74,6 @@ def inpaint_handle_alpha_channel(original_alpha, mask):
 class InpainterBase(BaseModule):
 
     inpaint_by_block = True
-    check_need_inpaint = True
-
-    _postprocess_hooks = OrderedDict()
-    _preprocess_hooks = OrderedDict()
 
     def __init__(self, **params) -> None:
         super().__init__(**params)
@@ -177,7 +172,7 @@ class InpainterBase(BaseModule):
                 im = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
                 msk = mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
                 need_inpaint = True
-                if self.check_need_inpaint or check_need_inpaint:
+                if pcfg.module.check_need_inpaint or check_need_inpaint:
                     ballon_msk, non_text_msk = extract_ballon_mask(im, msk)
                     if ballon_msk is not None:
                         non_text_region = np.where(non_text_msk > 0)

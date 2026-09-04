@@ -18,14 +18,20 @@ def find_model_paths(model_dir, prefixes):
         'data/models/ysgyolo_yolo26_2.0.pt',
         'data/models/ysgyolo_yolo26OBB_2.0.pt'
     ]
+    if isinstance(prefixes, str):
+        prefixes = (prefixes,)
     if not osp.exists(model_dir):
         return []
     found_list = [
         osp.join(model_dir, p).replace('\\', '/')
         for p in sorted(os.listdir(model_dir))
-        if p.startswith(prefixes)
+        if p.startswith(tuple(prefixes))
     ]
     for p in default_path_list:
+        # Keep bundled download targets scoped to the requested model family,
+        # just like the locally discovered checkpoint paths above.
+        if not osp.basename(p).startswith(tuple(prefixes)):
+            continue
         if p not in found_list:
             found_list.append(p)
 
@@ -108,12 +114,12 @@ class YSGYoloDetector(TextDetectorBase):
 
     download_file_list = [
         {
-            'url': 'https://huggingface.co/YSGforMTL/YSGYoloDetector/resolve/main/ysgyolo_yolo26OBB_2.0.pt',
+            'url': 'https://huggingface.co/dreMaz/mit_models/resolve/main/ysgyolo_yolo26OBB_2.0.pt',
             'files': 'data/models/ysgyolo_yolo26OBB_2.0.pt',
             'sha256_pre_calculated': 'a9c03afb069285fc9e0d3fffc3c9ead440b687570952a945391ba22cd843dc3f'
         },
         {
-            'url': 'https://huggingface.co/YSGforMTL/YSGYoloDetector/resolve/main/ysgyolo_yolo26_2.0.pt',
+            'url': 'https://huggingface.co/dreMaz/mit_models/resolve/main/ysgyolo_yolo26_2.0.pt',
             'files': 'data/models/ysgyolo_yolo26_2.0.pt',
             'sha256_pre_calculated': '889347d65c8636dd188a8ed4f312b29658543faaa69016b5958ddf0559980e22'
         }

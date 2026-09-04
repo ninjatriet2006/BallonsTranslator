@@ -70,6 +70,8 @@ disable_bundled_windows_user_site()
 import ballontranslator.utils.shared as shared # Earlier import of shared to use default for config_path argument
 from ballontranslator.utils.version import APP_VERSION
 
+os.environ['NUMBA_CACHE_DIR'] = osp.join(shared.cache_dir, 'numba')
+
 PATH_ROOT = Path(shared.PROGRAM_PATH)
 PATH_FONTS = str(PATH_ROOT / 'fonts')
 
@@ -86,6 +88,13 @@ parser.add_argument("--exec_dirs", default='', help='translation queue (project 
 parser.add_argument("--ldpi", default=None, type=float, help='logical dots perinch')
 parser.add_argument("--export-translation-txt", action='store_true', help='save translation to txt file once RUN completed')
 parser.add_argument("--export-source-txt", action='store_true', help='save source to txt file once RUN completed')
+parser.add_argument(
+    "--show-release-info",
+    "--show_release_info",
+    dest="show_release_info",
+    action='store_true',
+    help='show cached GitHub release information on startup without making an API request',
+)
 parser.add_argument(
     "--config",
     "--config_path",
@@ -235,7 +244,7 @@ def main():
     from ballontranslator.utils.io_utils import find_all_files_recursive
     from ballontranslator.utils import config as program_config
 
-    from qtpy.QtCore import QTranslator, QLocale, Qt
+    from qtpy.QtCore import QTranslator, QLocale, Qt, QTimer
     shared.args = args
     shared.DEFAULT_DISPLAY_LANG = QLocale.system().name().replace('en_CN', 'zh_CN')
     shared.HEADLESS = args.headless
@@ -268,6 +277,13 @@ def main():
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True) #use high dpi icons
         QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
+    if sys.platform == 'win32':
+        application_attribute = getattr(Qt, 'ApplicationAttribute', Qt)
+        QApplication.setAttribute(
+            application_attribute.AA_DontCreateNativeWidgetSiblings,
+            True,
+        )
+
     os.chdir(shared.PROGRAM_PATH)
 
     app_args = sys.argv
@@ -293,13 +309,20 @@ def main():
         LOGGER.warning(f'target display language file {langp} doesnt exist.')
     LOGGER.info(f'set display language to {lang}')
 
-    # Fonts
-    # Load custom fonts if they exist
+    # Capture system families before registering bundled fonts so the runtime
+    # registry can keep both sources separate.
+    if shared.FLAG_QT6:
+        font_database = QFontDatabase
+    else:
+        font_database = QFontDatabase()
+    system_families = sorted(font_database.families(), key=str.casefold)
+    font_paths = []
     if osp.exists(PATH_FONTS):
-        for fp in find_all_files_recursive(PATH_FONTS, FONT_EXTS):
-            fnt_idx = QFontDatabase.addApplicationFont(fp)
-            if fnt_idx >= 0:
-                shared.CUSTOM_FONTS.append(QFontDatabase.applicationFontFamilies(fnt_idx)[0])
+        # Qt can reject relative application-font paths on macOS.
+        font_paths = [
+            str(Path(path).resolve())
+            for path in find_all_files_recursive(PATH_FONTS, FONT_EXTS)
+        ]
 
     if sys.platform == 'win32' and args.headless:
         # font database does not initialise on windows with qpa -offscreen:
@@ -309,13 +332,39 @@ def main():
         for fd in font_dir_list:
             fp_list = find_all_files_recursive(fd, FONT_EXTS)
             for fp in fp_list:
-                fnt_idx = QFontDatabase.addApplicationFont(fp)
+                QFontDatabase.addApplicationFont(str(Path(fp).resolve()))
+        system_families = sorted(font_database.families(), key=str.casefold)
 
-    if shared.FLAG_QT6:
-        shared.FONT_FAMILIES = set(f for f in QFontDatabase.families())
-    else:
-        fdb = QFontDatabase()
-        shared.FONT_FAMILIES = set(fdb.families())
+    from ballontranslator.utils.font_registry import (
+        build_font_registry,
+        ensure_font_registry_overrides,
+    )
+    font_registry_path = ensure_font_registry_overrides(APP_DIR)
+    shared.FONT_REGISTRY = build_font_registry(
+        font_database,
+        font_paths,
+        system_families,
+        locale=lang,
+        font_registry_path=(
+            str(font_registry_path)
+            if font_registry_path is not None
+            else None
+        ),
+    )
+    shared.FONT_FAMILIES = set(font_database.families())
+
+    from ballontranslator.ui.text_engine.font_family import (
+        register_qt_font_family_aliases,
+    )
+    font_aliases = register_qt_font_family_aliases(
+        font_database.families(),
+        font_database.styles,
+    )
+    if font_aliases:
+        LOGGER.info(
+            'Registered Qt-safe aliases for %d font families.',
+            len(font_aliases),
+        )
 
     app_font = QFont('Microsoft YaHei UI')
     if not app_font.exactMatch() or sys.platform == 'darwin':
@@ -334,6 +383,9 @@ def main():
     from ballontranslator.ui.mainwindow import MainWindow
     from ballontranslator.utils.message import create_info_dialog
     ballontrans = MainWindow(app, config, open_dir=args.proj_dir, **vars(args))
+    delete_on_close = getattr(Qt, 'WidgetAttribute', Qt).WA_DeleteOnClose
+    # Destroy the Qt window tree before SIP performs interpreter-exit cleanup.
+    ballontrans.setAttribute(delete_on_close, True)
     global BT
     BT = ballontrans
     BT.restart_signal.connect(restart)
@@ -345,13 +397,20 @@ def main():
 
         ballontrans.setWindowIcon(QIcon(shared.ICON_PATH))
         ballontrans.show()
-        ballontrans.resetStyleSheet()
+        if shared.ON_WINDOWS:
+            from ballontranslator.ui.framelesswindow import FramelessMoveResize
+            # SC_MAXIMIZE animates only after the normal window is visible.
+            QTimer.singleShot(
+                0,
+                lambda: FramelessMoveResize.maximize(ballontrans),
+            )
     if updated_mirrors:
         create_info_dialog(QApplication.translate(
             'NetworkMirrors',
             'Network mirrors were selected automatically for better access to dependencies and model downloads.',
         ))
-    sys.exit(app.exec())
+    # Let this frame release Qt objects before SIP's interpreter-exit cleanup.
+    return app.exec()
 
 
 if __name__ == '__main__':

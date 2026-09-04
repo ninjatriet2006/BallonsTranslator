@@ -143,6 +143,10 @@ class Model48pxOCR:
     def __call__(self, textblk_lst: List[TextBlock], regions: List[np.ndarray], textblk_lst_indices: List, chunk_size = 16) -> None:
         perm = range(len(regions))
         chunck_idx = 0
+        color_totals = defaultdict(
+            lambda: [np.zeros(3, dtype=np.float32),
+                     np.zeros(3, dtype=np.float32)]
+        )
         for indices in chunks(perm, chunk_size):
             N = len(indices)
             widths = [regions[i].shape[1] for i in indices]
@@ -204,11 +208,16 @@ class Model48pxOCR:
                 bb = min(max(int(bb()), 0), 255)
                 # self.logger.info(f'prob: {prob} {txt} fg: ({fr}, {fg}, {fb}) bg: ({br}, {bg}, {bb})')
                 
-                cur_region = textblk_lst[textblk_lst_indices[i+chunck_idx]]
+                block_index = textblk_lst_indices[i+chunck_idx]
+                cur_region = textblk_lst[block_index]
                 cur_region.text.append(txt)
-                cur_region.update_font_colors(np.array([fr, fg, fb]), np.array([br, bg, bb]))
+                color_totals[block_index][0] += np.array([fr, fg, fb])
+                color_totals[block_index][1] += np.array([br, bg, bb])
 
             chunck_idx += N
+
+        for block_index, (fg_total, bg_total) in color_totals.items():
+            textblk_lst[block_index].update_font_colors(fg_total, bg_total)
 
 
 
@@ -788,9 +797,27 @@ class OCR(nn.Module):
             batch_index = batch_index.index_select(0, torch.tensor(remaining_indexs, device=img.device))
 
 
-        # Ensure we have the correct number of finished hypotheses for each sample
-        assert len(finished_hypos) == N
-
+        # A difficult crop may reach the sequence limit before two beams emit
+        # EOS. Preserve the best live beam, matching infer_beam_batch's
+        # fallback, so one non-terminating sample cannot fail the whole batch.
+        if len(finished_hypos) < N:
+            active_log_probs = log_probs.view(N_remaining, beams_k)
+            for active_idx in range(N_remaining):
+                original_idx = batch_index[active_idx * beams_k].item()
+                if original_idx in finished_hypos:
+                    continue
+                best_beam_idx = active_log_probs[active_idx].argmax().item()
+                beam_idx = active_idx * beams_k + best_beam_idx
+                final_idx = out_idx[beam_idx]
+                sequence_length = max(final_idx.numel() - 1, 1)
+                probability = torch.exp(
+                    log_probs[beam_idx] / sequence_length
+                ).item()
+                finished_hypos[original_idx] = (
+                    final_idx,
+                    probability,
+                    cached_activations[beam_idx],
+                )
 
         # Final output processing and color predictions
         result = []

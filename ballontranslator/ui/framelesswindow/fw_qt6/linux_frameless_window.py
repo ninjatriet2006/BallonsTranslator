@@ -13,8 +13,8 @@ class LinuxFramelessWindow(QWidget):
 
     BORDER_WIDTH = 5
 
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
+    def __init__(self, parent=None, flags=Qt.WindowType.Widget):
+        super().__init__(parent, flags)
         self.windowEffect = LinuxWindowEffect(self)
         # self.titleBar = TitleBar(self)
         self._isSystemButtonVisible = False
@@ -87,12 +87,19 @@ class LinuxFramelessWindow(QWidget):
     #     return QRect(0, 0, size.width(), size.height())
 
     def eventFilter(self, obj, event):
+        if (
+            not self._isResizeEnabled
+            or not isinstance(obj, QWidget)
+            or obj.window() is not self
+            or not isinstance(event, QMouseEvent)
+        ):
+            return super().eventFilter(obj, event)
         et = event.type()
-        if et != QEvent.Type.MouseButtonPress and et != QEvent.Type.MouseMove or not self._isResizeEnabled:
-            return False
+        if et != QEvent.Type.MouseButtonPress and et != QEvent.Type.MouseMove:
+            return super().eventFilter(obj, event)
 
         edges = Qt.Edge(0)
-        pos = event.globalPosition().toPoint() - self.pos()
+        pos = obj.mapTo(self, event.position().toPoint())
         if pos.x() < self.BORDER_WIDTH:
             edges |= Qt.Edge.LeftEdge
         if pos.x() >= self.width()-self.BORDER_WIDTH:
@@ -115,7 +122,13 @@ class LinuxFramelessWindow(QWidget):
             else:
                 self.setCursor(Qt.CursorShape.ArrowCursor)
 
-        # elif obj in (self, self.titleBar) and et == QEvent.Type.MouseButtonPress and edges:
-        #     LinuxMoveResize.starSystemResize(self, event.globalPosition(), edges)
+        elif (
+            et == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and edges
+            and self.windowState() == Qt.WindowState.WindowNoState
+        ):
+            LinuxMoveResize.starSystemResize(self, event.globalPosition(), edges)
+            return True
 
         return super().eventFilter(obj, event)

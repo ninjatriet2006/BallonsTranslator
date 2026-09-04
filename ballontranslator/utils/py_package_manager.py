@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -9,10 +10,12 @@ from typing import Callable, Dict, Iterable, List, Optional
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion
 from ballontranslator.utils import package_installer
 from ballontranslator.utils.package_installer import InstallResult
 from ballontranslator.utils.torch_install_helper import (
     TORCH_FAMILY_PACKAGES,
+    TorchInstallRequest,
     detect_nvidia_gpus,
     has_plain_unpinned_torch,
     prepare_torch_install_request,
@@ -392,6 +395,12 @@ class PyPackageManager:
             torch_device=torch_device,
             torch_cuda_version=torch_cuda_version,
         )
+        return self._build_install_commands(requests)
+
+    def _build_install_commands(
+        self,
+        requests: Iterable[TorchInstallRequest],
+    ) -> List[List[str]]:
         constraint_files = self._runtime_constraint_files()
         return [
             package_installer.build_install_command(
@@ -417,11 +426,35 @@ class PyPackageManager:
             torch_device=torch_device,
             torch_cuda_version=torch_cuda_version,
         )
+        uninstall_command = self._torch_uninstall_command(requests)
         if progress_callback is not None:
             progress_callback({
                 'event': 'installing_packages',
                 'message': self._installing_packages_summary(requirements),
             })
+        if uninstall_command:
+            try:
+                completed = subprocess.run(
+                    uninstall_command,
+                    env=self.env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    shell=False,
+                )
+                result = InstallResult(
+                    completed.returncode == 0,
+                    uninstall_command,
+                    returncode=completed.returncode,
+                    stdout=completed.stdout or '',
+                )
+            except Exception as e:
+                result = InstallResult(False, uninstall_command, returncode=-1, error=str(e))
+            if not result.ok:
+                return result
         constraint_files = self._runtime_constraint_files()
         final_result = None
         for request in requests:
@@ -447,14 +480,17 @@ class PyPackageManager:
         torch_device: Optional[str] = None,
         torch_cuda_version: Optional[str] = None,
     ) -> str:
-        return '\n'.join(
-            shlex.join(command)
-            for command in self.build_install_commands(
-                requirements,
-                torch_device=torch_device,
-                torch_cuda_version=torch_cuda_version,
-            )
+        requirements = list(requirements)
+        requests = self._prepare_install_requests(
+            requirements,
+            torch_device=torch_device,
+            torch_cuda_version=torch_cuda_version,
         )
+        commands = self._build_install_commands(requests)
+        uninstall_command = self._torch_uninstall_command(requests)
+        if uninstall_command:
+            commands.insert(0, uninstall_command)
+        return '\n'.join(shlex.join(command) for command in commands)
 
     def torch_install_device(self, requirements: Iterable[str]) -> str:
         """Return the device selected by torch install probing.
@@ -511,7 +547,7 @@ class PyPackageManager:
         requirements: Iterable[str],
         torch_device: Optional[str] = None,
         torch_cuda_version: Optional[str] = None,
-    ):
+    ) -> List[TorchInstallRequest]:
         request = prepare_torch_install_request(
             requirements=requirements,
             env=self.env,
@@ -550,6 +586,22 @@ class PyPackageManager:
             ))
         return requests
 
+    @staticmethod
+    def _torch_uninstall_command(requests: Iterable[TorchInstallRequest]) -> List[str]:
+        requested_packages = {
+            canonicalize_name(Requirement(requirement).name)
+            for request in requests
+            for requirement in request.requirements
+        }
+        installed_packages = [
+            package_name
+            for package_name in ('torch', 'torchvision')
+            if package_name in requested_packages and _distribution_installed(package_name)
+        ]
+        if not installed_packages:
+            return []
+        return [sys.executable, '-m', 'pip', 'uninstall', '-y', *installed_packages]
+
     def _runtime_constraint_files(self) -> List[str]:
         """Return constraint files that protect loaded core native packages.
 
@@ -580,14 +632,37 @@ class PyPackageManager:
             dist = importlib_metadata.distribution(req.name)
         except importlib_metadata.PackageNotFoundError:
             return False
-        if req.specifier and not req.specifier.contains(dist.version, prereleases=True):
-            return False
+        if req.specifier:
+            version = dist.version
+            if not version:
+                return False
+            try:
+                if not req.specifier.contains(version, prereleases=True):
+                    return False
+            except (InvalidVersion, TypeError):
+                return False
         return True
 
     @staticmethod
     def _import_available(import_name: str) -> bool:
         try:
-            return importlib.util.find_spec(import_name) is not None
+            spec = importlib.util.find_spec(import_name)
+            if spec is None:
+                return False
+            # Check if it is a corrupted package (e.g. folder exists but missing __init__.py,
+            # which Python imports as a namespace package).
+            if spec.loader is None and spec.submodule_search_locations is not None:
+                has_init = False
+                for loc in spec.submodule_search_locations:
+                    for ext in ('.py', '.pyc', '.pyd', '.so'):
+                        if os.path.exists(os.path.join(loc, f'__init__{ext}')):
+                            has_init = True
+                            break
+                    if has_init:
+                        break
+                if not has_init:
+                    return False
+            return True
         except (ImportError, ModuleNotFoundError, ValueError):
             return False
 

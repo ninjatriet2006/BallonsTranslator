@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ballontranslator.utils.registry import ModuleSpec
+from ballontranslator.utils.logger import logger as LOGGER
 from ballontranslator.utils.torch_install_helper import detect_nvidia_gpus
 
-from .base import MODULE_ROOT, MODULE_SCRIPTS
+from .base import CUSTOM_MODULE_ROOT, MODULE_ROOT, MODULE_SCRIPTS, torch_available
 
 
 UNKNOWN = object()
@@ -89,6 +90,22 @@ def _torch_package_backend():
     return None
 
 
+def probe_torch_package() -> Tuple[Optional[str], Optional[str]]:
+    """Return installed Torch version and inferred device without importing Torch.
+
+    >>> version, device = probe_torch_package()
+    >>> (version is None) == (device is None)
+    True
+    """
+
+    if not torch_available():
+        return None, None
+    version = _package_version('torch')
+    if version is None:
+        return None, None
+    return version, _torch_package_backend() or 'cpu'
+
+
 @lru_cache(maxsize=1)
 def _nvidia_cuda_available() -> bool:
     """Return whether the driver reports NVIDIA GPU availability.
@@ -141,7 +158,7 @@ def _find_model_paths(model_dir, prefixes):
         ...     _ = Path(tmp, 'ysgyolo_demo.pt').write_text('')
         ...     _ = Path(tmp, 'other.pt').write_text('')
         ...     _find_model_paths(tmp, ('ysgyolo',))  # doctest: +ELLIPSIS
-        ['...ysgyolo_demo.pt']
+        ['...ysgyolo_demo.pt', 'data/models/ysgyolo_yolo26_2.0.pt', 'data/models/ysgyolo_yolo26OBB_2.0.pt']
     """
 
     default_path_list = [
@@ -162,6 +179,10 @@ def _find_model_paths(model_dir, prefixes):
     ]
 
     for p in default_path_list:
+        # Built-in download targets must obey the same prefix filter as local
+        # files; SafeEval can encounter this helper with non-YSG prefixes.
+        if not os.path.basename(p).startswith(tuple(prefixes)):
+            continue
         if p not in found_list:
             found_list.append(p)
 
@@ -443,10 +464,14 @@ def _module_name_from_path(path: str) -> str:
         rel_path = path_obj.relative_to(PACKAGE_ROOT)
         return 'ballontranslator.' + '.'.join(rel_path.with_suffix('').parts)
     except ValueError:
-        module_name = path.replace(os.sep, '.').replace('/', '.')
-        if module_name.endswith('.py'):
-            module_name = module_name[:-3]
-        return module_name
+        try:
+            rel_path = path_obj.relative_to(CUSTOM_MODULE_ROOT.resolve())
+            return 'custom_modules.' + '.'.join(rel_path.with_suffix('').parts)
+        except ValueError:
+            module_name = path.replace(os.sep, '.').replace('/', '.')
+            if module_name.endswith('.py'):
+                module_name = module_name[:-3]
+            return module_name
 
 
 def _decorator_key(node, module_type: str, env: Dict[str, Any]) -> Optional[str]:
@@ -683,7 +708,7 @@ def validate_lazy_module_specs(specs: Iterable[ModuleSpec]) -> List[str]:
     return warnings
 
 
-def _scan_file(path: str, module_type: str) -> List[ModuleSpec]:
+def _scan_file(path: str, module_type: str, include_inactive_platform_branches: bool = False) -> List[ModuleSpec]:
     """Build lazy module specs from decorators and class attributes in one file.
 
     Example:
@@ -739,6 +764,24 @@ def _scan_file(path: str, module_type: str) -> List[ModuleSpec]:
         'None': None,
     }
 
+    def is_platform_condition(node):
+        for child in ast.walk(node):
+            if isinstance(child, ast.Attribute):
+                if isinstance(child.value, ast.Name):
+                    if child.value.id == 'sys' and child.attr == 'platform':
+                        return True
+                    if child.value.id == 'shared' and child.attr in {
+                        'ON_WINDOWS', 'ON_MACOS', 'ON_LINUX', 'ON_APPLE_SILICON',
+                    }:
+                        return True
+                if (
+                    isinstance(child.value, ast.Name)
+                    and child.value.id == 'platform'
+                    and child.attr in {'system', 'mac_ver', 'version', 'machine'}
+                ):
+                    return True
+        return False
+
     def walk(stmts):
         _walk_assignments(stmts, env)
         evaluator = SafeEval(env)
@@ -776,6 +819,8 @@ def _scan_file(path: str, module_type: str) -> List[ModuleSpec]:
                     walk(node.body)
                 elif cond is False:
                     walk(node.orelse)
+                    if include_inactive_platform_branches and is_platform_condition(node.test):
+                        walk(node.body)
                 else:
                     walk(node.body)
                     walk(node.orelse)
@@ -784,6 +829,53 @@ def _scan_file(path: str, module_type: str) -> List[ModuleSpec]:
 
     walk(tree.body)
     return specs
+
+
+def _module_files(module_type: str) -> List[str]:
+    script = MODULE_SCRIPTS[module_type]
+    pattern = re.compile(script['module_pattern'])
+    files = []
+    module_dir = script['module_dir']
+    if os.path.isdir(module_dir):
+        for name in sorted(os.listdir(module_dir)):
+            if pattern.match(name):
+                files.append(os.path.join(module_dir, name))
+    files.extend(EXTRA_MODULE_FILES.get(module_type, []))
+    if os.path.isdir(CUSTOM_MODULE_ROOT):
+        for name in sorted(os.listdir(CUSTOM_MODULE_ROOT)):
+            if pattern.match(name):
+                files.append(os.path.join(CUSTOM_MODULE_ROOT, name))
+    return [path for path in files if os.path.exists(path)]
+
+
+def _is_custom_module_file(path: str) -> bool:
+    try:
+        Path(path).resolve().relative_to(CUSTOM_MODULE_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def iter_lazy_module_specs(include_inactive_platform_branches: bool = False):
+    """Yield module metadata without changing the active runtime registries.
+
+    The translation catalog needs metadata from platform-specific modules too;
+    those modules must remain absent from the runtime registry on unsupported
+    platforms.
+
+    Example:
+        >>> list(iter_lazy_module_specs())  # doctest: +SKIP
+        [...]
+    """
+
+    for module_type in sorted(MODULE_SCRIPTS):
+        for path in _module_files(module_type):
+            try:
+                yield from _scan_file(path, module_type, include_inactive_platform_branches)
+            except Exception as e:
+                if not _is_custom_module_file(path):
+                    raise
+                LOGGER.warning(f'Failed to scan custom module {path}: {e}')
 
 
 def init_lazy_module_registries(target_modules=None):
@@ -797,19 +889,6 @@ def init_lazy_module_registries(target_modules=None):
 
     from . import MODULETYPE_TO_REGISTRIES
 
-    def _module_files(module_type: str) -> List[str]:
-        script = MODULE_SCRIPTS[module_type]
-        module_dir = script['module_dir']
-        pattern = re.compile(script['module_pattern'])
-        files = []
-        if os.path.isdir(module_dir):
-            for name in sorted(os.listdir(module_dir)):
-                if pattern.match(name):
-                    files.append(os.path.join(module_dir, name))
-        files.extend(EXTRA_MODULE_FILES.get(module_type, []))
-        return [path for path in files if os.path.exists(path)]
-
-
     def _targets(target_modules=None):
         if target_modules is None:
             return list(MODULE_SCRIPTS.keys())
@@ -822,7 +901,14 @@ def init_lazy_module_registries(target_modules=None):
             continue
         registry = MODULETYPE_TO_REGISTRIES[module_type]
         for path in _module_files(module_type):
-            for spec in _scan_file(path, module_type):
-                registry.register_lazy_module(spec)
+            try:
+                for spec in _scan_file(path, module_type):
+                    registry.register_lazy_module(spec)
+                    if _is_custom_module_file(path):
+                        LOGGER.info(f'Discovered custom {module_type} module "{spec.key}" from {path}')
+            except Exception as e:
+                if not _is_custom_module_file(path):
+                    raise
+                LOGGER.warning(f'Failed to register custom module {path}: {e}')
         # Registry groups are idempotent; re-scanning could overwrite live classes.
         INITIALIZED_REGISTRIES.add(module_type)

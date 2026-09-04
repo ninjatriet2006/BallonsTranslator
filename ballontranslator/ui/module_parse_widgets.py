@@ -1,17 +1,43 @@
-from typing import List, Callable
+from .custom_widget import ParamComboBox, ParamNameLabel
+from ballontranslator.utils.shared import (
+    CONFIG_COMBOBOX_HEIGHT,
+    CONFIG_COMBOBOX_LONG,
+    CONFIG_CONTENT_ROW_SPACING,
+    size2width,
+)
+from ballontranslator.utils.config import save_config
+from .framelesswindow import OutsideClickFramelessMixin
+from .module_param_i18n import (
+    tr_module_description,
+    tr_param_description,
+    tr_param_display_name,
+)
 
-from ballontranslator.modules import GET_VALID_INPAINTERS, GET_VALID_TEXTDETECTORS, GET_VALID_TRANSLATORS, GET_VALID_OCR
-from ballontranslator.utils.logger import logger as LOGGER
-from .custom_widget import ConfigComboBox, ParamComboBox, NoBorderPushBtn, ParamNameLabel
-from ballontranslator.utils.shared import CONFIG_COMBOBOX_LONG, size2width, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
-from ballontranslator.utils.config import pcfg
+from qtpy.QtWidgets import (
+    QAbstractScrollArea,
+    QApplication,
+    QPlainTextEdit,
+    QHBoxLayout,
+    QVBoxLayout,
+    QWidget,
+    QCheckBox,
+    QLineEdit,
+    QGridLayout,
+    QPushButton,
+    QSizePolicy,
+    QMenu,
+    QDialog,
+    QFrame,
+    QLabel,
+    QScrollArea,
+)
+from qtpy.QtCore import QTimer, Qt, Signal
+from qtpy.QtGui import QDoubleValidator, QKeySequence
 
-from qtpy.QtWidgets import QPlainTextEdit, QHBoxLayout, QVBoxLayout, QWidget, QLabel, QCheckBox, QLineEdit, QGridLayout, QPushButton, QSizePolicy, QLayout
-from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QDoubleValidator
-
-LAYOUT_SET_MINIMUM_SIZE = getattr(getattr(QLayout, 'SizeConstraint', QLayout), 'SetMinimumSize')
-
+try:
+    from qtpy.QtGui import QAction
+except ImportError:
+    from qtpy.QtWidgets import QAction
 
 class ParamCheckGroup(QWidget):
 
@@ -24,6 +50,7 @@ class ParamCheckGroup(QWidget):
         self.label2widget = {}
         for k, v in check_group.items():
             checker = QCheckBox(text=k, parent=self)
+            checker.setObjectName('ConfigCheckBox')
             checker.setChecked(v)
             layout.addWidget(checker)
             self.label2widget[k] = checker
@@ -54,21 +81,110 @@ class ParamLineEditor(QLineEdit):
     def on_text_changed(self):
         self.paramwidget_edited.emit(self.param_key, self.text())
 
+
+class SecretLineEditor(QLineEdit):
+    """Password editor with an explicit copy path for hidden text.
+
+    Example:
+        >>> SecretLineEditor.__name__
+        'SecretLineEditor'
+    """
+
+    def copySecretText(self):
+        text = self.selectedText() if self.hasSelectedText() else self.text()
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self.copySecretText()
+            event.accept()
+            return
+        return super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        copy_action = QAction(self.tr('Copy'), menu)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.setEnabled(bool(self.text()))
+        paste_action = QAction(self.tr('Paste'), menu)
+        paste_action.setEnabled(not self.isReadOnly() and bool(QApplication.clipboard().text()))
+        select_all_action = QAction(self.tr('Select All'), menu)
+        select_all_action.setEnabled(bool(self.text()))
+        menu.addAction(copy_action)
+        menu.addAction(paste_action)
+        menu.addSeparator()
+        menu.addAction(select_all_action)
+        action = menu.exec(event.globalPos()) if hasattr(menu, 'exec') else menu.exec_(event.globalPos())
+        if action == copy_action:
+            self.copySecretText()
+        elif action == paste_action:
+            self.paste()
+        elif action == select_all_action:
+            self.selectAll()
+
+
+class SecretParamWidget(QWidget):
+    """Password-style parameter editor.
+
+    Example:
+        >>> SecretParamWidget.__name__
+        'SecretParamWidget'
+    """
+
+    paramwidget_edited = Signal(str, str)
+
+    def __init__(self, param_key: str, size='short', fixed_size: bool = True, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setObjectName('SecretParamWidget')
+        self.param_key = param_key
+        self.editor = SecretLineEditor(self)
+        if fixed_size:
+            self.editor.setFixedWidth(size2width(size))
+            self.setFixedWidth(size2width(size))
+        else:
+            self.editor.setMinimumWidth(size2width(size))
+            self.editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.setMinimumWidth(size2width(size))
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.editor.setFixedHeight(CONFIG_COMBOBOX_HEIGHT)
+        self.editor.setEchoMode(QLineEdit.EchoMode.Password)
+        self.editor.setToolTip(self.tr(
+            'Stored in portable obfuscated form. This hides the key from plain-text scans, '
+            'but it is not a secure password vault.'
+        ))
+        self.setFixedHeight(CONFIG_COMBOBOX_HEIGHT)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.editor)
+        self.editor.textChanged.connect(self.on_text_changed)
+
+    def on_text_changed(self):
+        self.paramwidget_edited.emit(self.param_key, self.editor.text())
+
+    def setText(self, text: str):
+        self.editor.setText(text)
+
+    def text(self):
+        return self.editor.text()
+
+    def setFocus(self, *args, **kwargs):
+        return self.editor.setFocus(*args, **kwargs)
+
 class ParamEditor(QPlainTextEdit):
     
     paramwidget_edited = Signal(str, str)
     def __init__(self, param_key: str, *args, **kwargs) -> None:
         super().__init__( *args, **kwargs)
         self.param_key = param_key
+        self._auto_max_height = 100
 
-        if param_key == 'chat sample':
-            self.setFixedWidth(int(CONFIG_COMBOBOX_LONG * 1.2))
-            self.setFixedHeight(200)
-        else:
-            self.setFixedWidth(CONFIG_COMBOBOX_LONG)
-            self.setFixedHeight(100)
-        # self.setFixedHeight(CONFIG_COMBOBOX_HEIGHT)
+        self._showed = False
+
+        self.setFixedWidth(int(CONFIG_COMBOBOX_LONG))
         self.textChanged.connect(self.on_text_changed)
+        self.document().documentLayout().documentSizeChanged.connect(lambda *_: self.adjustSize())
 
     def on_text_changed(self):
         self.paramwidget_edited.emit(self.param_key, self.text())
@@ -79,6 +195,30 @@ class ParamEditor(QPlainTextEdit):
     def text(self):
         return self.toPlainText()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._showed:
+            self._showed = True
+            QTimer.singleShot(0, self.adjustSize)
+
+    def adjustSize(self):
+
+        # QPlainTextDocumentLayout.documentSize().height() reports a block
+        # count here; block bounds provide the actual wrapped visual heights.
+        document_layout = self.document().documentLayout()
+        block = self.document().begin()
+        content_height = 0.0
+        while block.isValid():
+            content_height += document_layout.blockBoundingRect(block).height()
+            if content_height >= self._auto_max_height:
+                break
+            block = block.next()
+
+        content_height += self.frameWidth() * 2
+        height = min(round(content_height), self._auto_max_height)
+        if self.height() != height:
+            self.setFixedHeight(height)
+
 
 class ParamCheckerBox(QWidget):
     checker_changed = Signal(bool)
@@ -87,6 +227,7 @@ class ParamCheckerBox(QWidget):
         super().__init__(*args, **kwargs)
         self.param_key = param_key
         self.checker = QCheckBox()
+        self.checker.setObjectName('ConfigCheckBox')
         name_label = ParamNameLabel(param_key)
         hlayout = QHBoxLayout(self)
         hlayout.addWidget(self.checker)
@@ -100,23 +241,20 @@ class ParamCheckerBox(QWidget):
         checked = 'true' if is_checked else 'false'
         self.paramwidget_edited.emit(self.param_key, checked)
 
+    def isChecked(self):
+        return self.checker.isChecked()
+
 
 class ParamCheckBox(QCheckBox):
     paramwidget_edited = Signal(str, bool)
     def __init__(self, param_key: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.setObjectName('ParamCheckBox')
         self.param_key = param_key
         self.stateChanged.connect(self.on_checker_changed)
 
     def on_checker_changed(self):
         self.paramwidget_edited.emit(self.param_key, self.isChecked())
-
-
-def get_param_display_name(param_key: str, param_dict: dict = None):
-    if param_dict is not None and isinstance(param_dict, dict):
-        if 'display_name' in param_dict:
-            return param_dict['display_name']
-    return param_key
 
 
 def ensure_current_device_option(param_dict: dict):
@@ -129,12 +267,24 @@ def ensure_current_device_option(param_dict: dict):
     param_dict['value'] = current_value if current_value in options else 'cpu'
 
 
+def set_label_tooltip_from_widget(label: QWidget, widget: QWidget):
+    """Mirror an editor tooltip onto its visible label.
+
+    Example:
+        >>> set_label_tooltip_from_widget.__name__
+        'set_label_tooltip_from_widget'
+    """
+    tooltip = widget.toolTip()
+    if tooltip:
+        label.setToolTip(tooltip)
+
+
 class ParamPushButton(QPushButton):
     paramwidget_edited = Signal(str, str)
-    def __init__(self, param_key: str, param_dict: dict = None, *args, **kwargs):
+    def __init__(self, param_key: str, display_name: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.param_key = param_key
-        self.setText(get_param_display_name(param_key, param_dict))
+        self.setText(display_name)
         self.clicked.connect(self.on_clicked)
 
     def on_clicked(self):
@@ -144,30 +294,57 @@ class ParamPushButton(QPushButton):
 class ParamWidget(QWidget):
 
     paramwidget_edited = Signal(str, dict)
-    def __init__(self, params, scrollWidget: QWidget = None, *args, **kwargs) -> None:
+    def __init__(
+        self,
+        params,
+        scrollWidget: QWidget = None,
+        module_type: str = '',
+        module_key: str = '',
+        spaced_fields: bool = False,
+        *args,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.module_type = module_type
+        self.module_key = module_key
+        horizontal_policy = (
+            QSizePolicy.Policy.Expanding
+            if spaced_fields
+            else QSizePolicy.Policy.Maximum
+        )
+        self.setSizePolicy(horizontal_policy, QSizePolicy.Policy.Maximum)
         layout = QHBoxLayout(self)
-        layout.setSizeConstraint(LAYOUT_SET_MINIMUM_SIZE)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.param_layout = param_layout = QGridLayout()
-        param_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.param_widgets = {}
+        self.param_rows = {}
         param_layout.setContentsMargins(0, 0, 0, 0)
-        param_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addLayout(param_layout)
-        layout.addStretch(-1)
+        param_layout.setVerticalSpacing(CONFIG_CONTENT_ROW_SPACING)
+        if spaced_fields:
+            param_layout.setColumnStretch(1, 1)
+            layout.addLayout(param_layout, 1)
+        else:
+            param_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            layout.addLayout(param_layout)
+            layout.addStretch(-1)
 
-        if 'description' in params:
-            self.setToolTip(params['description'])
+        module_description = tr_module_description(params, module_type, module_key)
+        if module_description:
+            self.setToolTip(module_description)
 
         for ii, param_key in enumerate(params):
             if param_key == 'description' or param_key.startswith('__'):
                 continue
-            display_param_name = param_key
+            display_param_name = tr_param_display_name(
+                params, param_key, module_type=module_type, module_key=module_key)
+            param_description = tr_param_description(
+                params, param_key, module_type=module_type, module_key=module_key)
 
             require_label = True
             is_str = isinstance(params[param_key], str)
             is_digital = isinstance(params[param_key], float) or isinstance(params[param_key], int)
             param_widget = None
+            label_above = False
 
             if isinstance(params[param_key], bool):
                 param_widget = ParamCheckBox(param_key)
@@ -185,13 +362,17 @@ class ParamWidget(QWidget):
 
             elif isinstance(params[param_key], dict):
                 param_dict = params[param_key]
-                display_param_name = get_param_display_name(param_key, param_dict)
+                display_param_name = tr_param_display_name(
+                    params, param_key, param_dict, module_type, module_key)
+                param_description = tr_param_description(
+                    params, param_key, param_dict, module_type, module_key)
                 value = params[param_key]['value']
                 param_widget = None  # Ensure initialization
                 param_type = param_dict['type'] if 'type' in param_dict else 'line_editor'
                 flush_btn = param_dict.get('flush_btn', False)
                 path_selector = param_dict.get('path_selector', False)
                 param_size = param_dict.get('size', 'short')
+                label_above = param_dict.get('label_above', False)
                 if param_key == 'device' and param_type == 'selector':
                     ensure_current_device_option(param_dict)
                     value = param_dict['value']
@@ -219,11 +400,15 @@ class ParamWidget(QWidget):
                     param_widget.setChecked(value)
 
                 elif param_type == 'pushbtn':
-                    param_widget = ParamPushButton(param_key, param_dict)
+                    param_widget = ParamPushButton(param_key, display_param_name)
                     require_label = False
 
                 elif param_type == 'line_editor':
-                    param_widget = ParamLineEditor(param_key, force_digital=is_digital)
+                    param_widget = ParamLineEditor(param_key, force_digital=isinstance(value, (float, int)))
+                    param_widget.setText(str(value))
+
+                elif param_type == 'secret':
+                    param_widget = SecretParamWidget(param_key, size=param_size)
                     param_widget.setText(str(value))
 
                 elif param_type == 'check_group':
@@ -231,15 +416,49 @@ class ParamWidget(QWidget):
 
                 if param_widget is not None:
                     param_widget.paramwidget_edited.connect(self.on_paramwidget_edited)
-                    if 'description' in param_dict:
-                        param_widget.setToolTip(param_dict['description'])
+                    if param_description:
+                        param_widget.setToolTip(param_description)
 
-            widget_idx = 0
-            if require_label:
+            if param_widget is not None and require_label and label_above:
+                self.param_widgets[param_key] = param_widget
+                row_widget = QWidget(self)
+                row_widget.setObjectName('ParamLabelAboveRow')
+                row_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                row_layout = QVBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(4)
                 param_label = ParamNameLabel(display_param_name)
+                param_label.setObjectName('ParamLabelAboveLabel')
+                set_label_tooltip_from_widget(param_label, param_widget)
+                row_layout.addWidget(param_label, 0, Qt.AlignmentFlag.AlignLeft)
+                row_layout.addWidget(param_widget, 0, Qt.AlignmentFlag.AlignLeft)
+                column_span = 3 if spaced_fields else 2
+                param_layout.addWidget(row_widget, ii, 0, 1, column_span)
+                self.param_rows[param_key] = [row_widget]
+                continue
+
+            widget_idx = 2 if spaced_fields else 0
+            row_widgets = []
+            if require_label:
+                label_alignment = None
+                if spaced_fields:
+                    label_alignment = (
+                        Qt.AlignmentFlag.AlignRight
+                        | Qt.AlignmentFlag.AlignVCenter
+                    )
+                param_label = ParamNameLabel(
+                    display_param_name,
+                    alignment=label_alignment,
+                )
+                param_label.setObjectName('ParamFieldLabel')
+                if param_widget is not None:
+                    set_label_tooltip_from_widget(param_label, param_widget)
                 param_layout.addWidget(param_label, ii, 0)
-                widget_idx = 1
+                row_widgets.append(param_label)
+                widget_idx = 2 if spaced_fields else 1
             if param_widget is not None:
+                self.param_widgets[param_key] = param_widget
+                row_widgets.append(param_widget)
                 pw_lo = None
                 if hasattr(param_widget, 'flush_btn') or hasattr(param_widget, 'path_select_btn'):
                     pw_lo = QHBoxLayout()
@@ -251,9 +470,20 @@ class ParamWidget(QWidget):
                     pw_lo.addWidget(param_widget.path_select_btn)
                     param_widget.pathbtn_clicked.connect(self.on_pathbtn_clicked)
                 if pw_lo is None:
-                    param_layout.addWidget(param_widget, ii, widget_idx)
+                    param_layout.addWidget(
+                        param_widget,
+                        ii,
+                        widget_idx,
+                        Qt.AlignmentFlag.AlignLeft,
+                    )
                 else:
-                    param_layout.addLayout(pw_lo, ii, widget_idx)
+                    param_layout.addLayout(
+                        pw_lo,
+                        ii,
+                        widget_idx,
+                        Qt.AlignmentFlag.AlignLeft,
+                    )
+                self.param_rows[param_key] = row_widgets
             else:
                 v = params[param_key]
                 raise ValueError(f"Failed to initialize widget for key-value pair: {param_key}-{v}")
@@ -272,217 +502,144 @@ class ParamWidget(QWidget):
         content_dict = {'content': param_content}
         self.paramwidget_edited.emit(param_key, content_dict)
 
-class ModuleParseWidgets(QWidget):
-    def addModulesParamWidgets(self, ocr_instance):
-        self.params = ocr_instance.get_params()
-        self.on_module_changed()
+    def setParamVisible(self, param_key: str, visible: bool):
+        for widget in self.param_rows.get(param_key, []):
+            widget.setVisible(visible)
 
-    def on_module_changed(self):
-        self.updateModuleParamWidget()
+    def setRuntimeActionsEnabled(self, enabled: bool) -> None:
+        """Disable commands that require a loaded module instance.
 
-    def updateModuleParamWidget(self):
-        widget = ParamWidget(self.params, scrollWidget=self)
-        layout = QVBoxLayout()
-        layout.addWidget(widget)
-        self.setLayout(layout)
+        >>> hasattr(ParamWidget, 'setRuntimeActionsEnabled')
+        True
+        """
+        for widget in self.param_widgets.values():
+            if isinstance(widget, ParamPushButton):
+                widget.setEnabled(enabled)
+            flush_button = getattr(widget, 'flush_btn', None)
+            if flush_button is not None:
+                flush_button.setEnabled(enabled)
 
-class ModuleConfigParseWidget(QWidget):
-    module_changed = Signal(str)
-    paramwidget_edited = Signal(str, dict)
-    def __init__(self, module_name: str, get_valid_module_keys: Callable, scrollWidget: QWidget, add_from: int = 1, *args, **kwargs) -> None:
-        super().__init__( *args, **kwargs)
-        self.get_valid_module_keys = get_valid_module_keys
-        self.module_combobox = ConfigComboBox(scrollWidget=scrollWidget)
-        self.params_layout = QHBoxLayout()
-        self.params_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.params_layout.setSizeConstraint(LAYOUT_SET_MINIMUM_SIZE)
-        self.params_layout.setContentsMargins(0, 0, 0, 0)
 
-        p_layout = QHBoxLayout()
-        p_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.module_label = ParamNameLabel(module_name)
-        p_layout.addWidget(self.module_label)
-        p_layout.addWidget(self.module_combobox)
-        p_layout.addStretch(-1)
-        self.p_layout = p_layout
+def has_configurable_params(params: dict) -> bool:
+    return isinstance(params, dict) and any(
+        key != 'description' and not key.startswith('__')
+        for key in params
+    )
 
-        layout = QVBoxLayout(self)
-        layout.setSizeConstraint(LAYOUT_SET_MINIMUM_SIZE)
-        self.param_widget_map = {}
-        layout.addLayout(p_layout) 
-        layout.addLayout(self.params_layout)
+
+class ModuleParamDialog(OutsideClickFramelessMixin, QDialog):
+    """Ephemeral editor for one selected module's live parameter mapping.
+
+    >>> issubclass(ModuleParamDialog, QDialog)
+    True
+    """
+
+    paramwidget_edited = Signal(str, str, str, dict)
+
+    def __init__(
+        self,
+        module_type: str,
+        module_key: str,
+        params: dict,
+        runtime_actions_enabled: bool,
+        parent: QWidget = None,
+    ) -> None:
+        window_type = getattr(Qt, 'WindowType', Qt)
+        super().__init__(
+            parent,
+            window_type.Dialog | window_type.FramelessWindowHint,
+        )
+        self.module_type = module_type
+        self.module_key = module_key
+        self.setObjectName('ModuleParamDialog')
+        self.setWindowTitle(module_key)
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        self.setMinimumWidth(420)
+        self.setMaximumHeight(640)
+        widget_attribute = getattr(Qt, 'WidgetAttribute', Qt)
+        self.setAttribute(widget_attribute.WA_TranslucentBackground)
+        self.setAttribute(widget_attribute.WA_DeleteOnClose)
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(5, 5, 5, 5)
+        surface = QFrame(self)
+        surface.setObjectName('ModuleParamSurface')
+        root_layout.addWidget(surface)
+
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(22, 16, 22, 18)
         layout.setSpacing(14)
-        self.vlayout = layout
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.title_bar = QWidget(surface)
+        self.title_bar.setObjectName('ModuleParamTitleBar')
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        self.title_label = QLabel(module_key, self.title_bar)
+        self.title_label.setObjectName('ModuleParamTitle')
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        self.close_button = None
+        layout.addWidget(self.title_bar)
 
-        self.visibleWidget: QWidget = None
-        self.module_dict: dict = {}
+        if has_configurable_params(params):
+            scroll = QScrollArea(surface)
+            scroll.setObjectName('ModuleParamScrollArea')
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setSizeAdjustPolicy(
+                QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents
+            )
+            scroll.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            self.param_widget = ParamWidget(
+                params,
+                scrollWidget=scroll,
+                module_type=module_type,
+                module_key=module_key,
+                spaced_fields=True,
+            )
+            self.param_widget.setObjectName('ModuleParamContent')
+            self.param_widget.setRuntimeActionsEnabled(runtime_actions_enabled)
+            self.param_widget.paramwidget_edited.connect(self._on_paramwidget_edited)
+            scroll.setWidget(self.param_widget)
+            scroll.setMinimumWidth(
+                self.param_widget.minimumSizeHint().width()
+                + scroll.verticalScrollBar().sizeHint().width()
+            )
+            layout.addWidget(scroll)
+        else:
+            self.param_widget = None
+            empty_label = QLabel(self.tr('No configurable param'), surface)
+            empty_label.setObjectName('ModuleParamEmptyLabel')
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(empty_label)
+        self.adjustSize()
 
-    def addModulesParamWidgets(self, module_dict: dict, selected_module: str = None):
-        invalid_module_keys = []
-        valid_modulekeys = self.get_valid_module_keys()
+    def _on_paramwidget_edited(self, param_key: str, content: dict) -> None:
+        self.paramwidget_edited.emit(
+            self.module_type,
+            self.module_key,
+            param_key,
+            content,
+        )
 
-        num_widgets_before = len(self.param_widget_map)
+    def _dismiss_transient_window(self) -> None:
+        parent = self.parentWidget()
+        parent_window = parent.window() if parent is not None else None
+        self.close()
+        if (
+            parent_window is not None
+            and parent_window.windowModality() != Qt.WindowModality.NonModal
+        ):
+            # Windows can miss this handoff when close() runs in the mouse filter.
+            parent_window.activateWindow()
 
-        for module in module_dict:
-            if module not in valid_modulekeys:
-                invalid_module_keys.append(module)
-                continue
+    def _preserve_on_outside_click(self) -> bool:
+        active_modal = QApplication.activeModalWidget()
+        parent = self.parentWidget()
+        parent_window = parent.window() if parent is not None else None
+        return active_modal not in (None, self, parent_window)
 
-            if module in self.param_widget_map:
-                LOGGER.warning(f'duplicated module key: {module}')
-                continue
-
-            self.module_combobox.addItem(module)
-            params = module_dict[module]
-            if params is not None:
-                self.param_widget_map[module] = None
-
-        if len(invalid_module_keys) > 0:
-            LOGGER.warning(F'Invalid module keys: {invalid_module_keys}')
-            for ik in invalid_module_keys:
-                module_dict.pop(ik)
-
-        self.module_dict = module_dict
-
-        num_widgets_after = len(self.param_widget_map)
-        if num_widgets_before == 0 and num_widgets_after > 0:
-            if selected_module in self.module_dict:
-                self.module_combobox.setCurrentText(selected_module)
-            self.updateModuleParamWidget()
-            self.module_combobox.currentTextChanged.connect(self.on_module_changed)
-
-    def setModule(self, module: str):
-        if self.module_combobox.currentText() == module and self.visibleWidget is not None:
-            return
-        self.blockSignals(True)
-        self.module_combobox.setCurrentText(module)
-        self.updateModuleParamWidget()
-        self.blockSignals(False)
-
-    def updateModuleParamWidget(self):
-        module = self.module_combobox.currentText()
-        if self.visibleWidget is not None:
-            self.visibleWidget.hide()
-        if module in self.param_widget_map:
-            widget: QWidget = self.param_widget_map[module]
-            if widget is None:
-                # Build parameter widgets only for the selected manifest entry.
-                params = self.module_dict[module]
-                widget = ParamWidget(params, scrollWidget=self)
-                widget.paramwidget_edited.connect(self.paramwidget_edited)
-                self.param_widget_map[module] = widget
-                self.params_layout.addWidget(widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-            else:
-                widget.show()
-            self.visibleWidget = widget
-
-    def on_module_changed(self):
-        self.updateModuleParamWidget()
-        self.module_changed.emit(self.module_combobox.currentText())
-
-
-class TranslatorConfigPanel(ModuleConfigParseWidget):
-
-    show_pre_MT_keyword_window = Signal()
-    show_MT_keyword_window = Signal()
-    show_OCR_keyword_window = Signal()
-
-    def __init__(self, module_name, scrollWidget: QWidget = None, *args, **kwargs) -> None:
-        super().__init__(module_name, GET_VALID_TRANSLATORS, scrollWidget=scrollWidget, *args, **kwargs)
-        self.translator_changed = self.module_changed
-    
-        self.source_combobox = ConfigComboBox(scrollWidget=scrollWidget)
-        self.target_combobox = ConfigComboBox(scrollWidget=scrollWidget)
-        self.replacePreMTkeywordBtn = NoBorderPushBtn(self.tr("Keyword substitution for machine translation source text"), self)
-        self.replacePreMTkeywordBtn.clicked.connect(self.show_pre_MT_keyword_window)
-        self.replacePreMTkeywordBtn.setFixedWidth(420)
-        self.replaceMTkeywordBtn = NoBorderPushBtn(self.tr("Keyword substitution for machine translation"), self)
-        self.replaceMTkeywordBtn.clicked.connect(self.show_MT_keyword_window)
-        self.replaceMTkeywordBtn.setFixedWidth(420)
-        self.replaceOCRkeywordBtn = NoBorderPushBtn(self.tr("Keyword substitution for source text"), self)
-        self.replaceOCRkeywordBtn.clicked.connect(self.show_OCR_keyword_window)
-        self.replaceOCRkeywordBtn.setFixedWidth(420)
-        self.translateByTextblockBox = ParamCheckerBox(self.tr('Translate each text block individually'))
-
-        st_layout = QHBoxLayout()
-        st_layout.setSpacing(15)
-        st_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        st_layout.addWidget(ParamNameLabel(self.tr('Source')))
-        st_layout.addWidget(self.source_combobox)
-        st_layout.addWidget(ParamNameLabel(self.tr('Target')))
-        st_layout.addWidget(self.target_combobox)
-        
-        self.vlayout.insertLayout(1, st_layout) 
-        self.vlayout.addWidget(self.translateByTextblockBox)
-        self.vlayout.addWidget(self.replaceOCRkeywordBtn)
-        self.vlayout.addWidget(self.replacePreMTkeywordBtn)
-        self.vlayout.addWidget(self.replaceMTkeywordBtn)
-
-    def setTranslatorMetadata(self, name: str, supported_src_list, supported_tgt_list, lang_source: str, lang_target: str):
-        refresh_params = self.module_combobox.currentText() != name or self.visibleWidget is None
-        self.source_combobox.blockSignals(True)
-        self.target_combobox.blockSignals(True)
-        self.module_combobox.blockSignals(True)
-
-        self.source_combobox.clear()
-        self.target_combobox.clear()
-
-        self.source_combobox.addItems(supported_src_list)
-        self.target_combobox.addItems(supported_tgt_list)
-        self.module_combobox.setCurrentText(name)
-        self.source_combobox.setCurrentText(lang_source)
-        self.target_combobox.setCurrentText(lang_target)
-        if refresh_params:
-            self.updateModuleParamWidget()
-        self.source_combobox.blockSignals(False)
-        self.target_combobox.blockSignals(False)
-        self.module_combobox.blockSignals(False)
-
-
-class InpaintConfigPanel(ModuleConfigParseWidget):
-    def __init__(self, module_name: str, scrollWidget: QWidget = None, *args, **kwargs) -> None:
-        super().__init__(module_name, GET_VALID_INPAINTERS, scrollWidget = scrollWidget, *args, **kwargs)
-        self.inpainter_changed = self.module_changed
-        self.setInpainter = self.setModule
-        self.needInpaintChecker = ParamCheckerBox(self.tr('Let the program decide whether it is necessary to use the selected inpaint method.'))
-        self.filter_mask_by_bboxes_checker = QCheckBox(text=self.tr('Filter mask by text boxes'))
-        self.vlayout.addWidget(self.needInpaintChecker)
-        self.vlayout.addWidget(self.filter_mask_by_bboxes_checker)
-
-    def showEvent(self, e) -> None:
-        self.p_layout.insertWidget(1, self.module_combobox)
-        super().showEvent(e)
-
-    def hideEvent(self, e) -> None:
-        self.p_layout.removeWidget(self.module_combobox)
-        return super().hideEvent(e)
-
-class TextDetectConfigPanel(ModuleConfigParseWidget):
-    def __init__(self, module_name: str, scrollWidget: QWidget = None, *args, **kwargs) -> None:
-        super().__init__(module_name, GET_VALID_TEXTDETECTORS, scrollWidget = scrollWidget, *args, **kwargs)
-        self.detector_changed = self.module_changed
-        self.setDetector = self.setModule
-        self.keep_existing_checker = QCheckBox(text=self.tr('Keep Existing Lines'))
-        self.vlayout.insertWidget(1, self.keep_existing_checker)
-        
-
-class OCRConfigPanel(ModuleConfigParseWidget):
-    def __init__(self, module_name: str, scrollWidget: QWidget = None, *args, **kwargs) -> None:
-        super().__init__(module_name, GET_VALID_OCR, scrollWidget = scrollWidget, *args, **kwargs)
-        self.ocr_changed = self.module_changed
-        self.setOCR = self.setModule
-        self.restoreEmptyOCRChecker = QCheckBox(self.tr("Delete and restore region where OCR return empty string."), self)
-        self.restoreEmptyOCRChecker.clicked.connect(self.on_restore_empty_ocr)
-        self.vlayout.addWidget(self.restoreEmptyOCRChecker)
-        # 字体检测选项
-        self.fontDetectChecker = QCheckBox(self.tr("Font Detection"), self)
-        self.fontDetectChecker.setChecked(pcfg.module.ocr_font_detect)
-        self.fontDetectChecker.clicked.connect(self.on_fontdetect_changed)
-        self.vlayout.addWidget(self.fontDetectChecker)
-
-    def on_restore_empty_ocr(self):
-        pcfg.restore_ocr_empty = self.restoreEmptyOCRChecker.isChecked()
-
-    def on_fontdetect_changed(self):
-        pcfg.module.ocr_font_detect = self.fontDetectChecker.isChecked()
+    def closeEvent(self, event) -> None:
+        save_config()
+        super().closeEvent(event)

@@ -1,9 +1,7 @@
 import gc
 import os
-import time
-from typing import Dict, List, Callable, Union
+from typing import Callable, Dict, List
 from copy import deepcopy
-from collections import OrderedDict
 import re
 import importlib
 import importlib.util
@@ -16,26 +14,6 @@ from ballontranslator.utils.lock import aquire_model_loading_lock, release_model
 
 
 GPUINTENSIVE_SET = {'cuda', 'mps', 'xpu', 'privateuseone'}
-
-def register_hooks(hooks_registered: OrderedDict, callbacks: Union[List, Callable, Dict]):
-    if callbacks is None:
-        return
-    if isinstance(callbacks, (Dict, OrderedDict)):
-        for k, v in callbacks.items():
-            hooks_registered[k] = v
-    else:
-        nhooks = len(hooks_registered)
-
-        if isinstance(callbacks, Callable):
-            callbacks = [callbacks]
-        for callback in callbacks:
-            hk = 'hook_' + str(nhooks).zfill(2)
-            while True:
-                if hk not in hooks_registered:
-                    break
-                hk = hk + '_' + str(time.time_ns())
-            hooks_registered[hk] = callback
-            nhooks += 1
 
 
 def patch_module_params(cfg_param, module_params, module_name: str = ''):
@@ -227,9 +205,6 @@ class BaseModule:
     params: Dict = None
     logger = LOGGER
 
-    _preprocess_hooks: OrderedDict = None
-    _postprocess_hooks: OrderedDict = None
-
     download_file_list: List = None
     download_file_on_load = False
     dependencies: List[str] = []
@@ -245,22 +220,6 @@ class BaseModule:
                 self.params = params
             else:
                 self.params.update(params)
-
-    @classmethod
-    def register_postprocess_hooks(cls, callbacks: Union[List, Callable]):
-        """
-        these hooks would be shared among all objects inherited from the same super class
-        """
-        assert cls._postprocess_hooks is not None
-        register_hooks(cls._postprocess_hooks, callbacks)
-
-    @classmethod
-    def register_preprocess_hooks(cls, callbacks: Union[List, Callable, Dict]):
-        """
-        these hooks would be shared among all objects inherited from the same super class
-        """
-        assert cls._preprocess_hooks is not None
-        register_hooks(cls._preprocess_hooks, callbacks)
 
     def get_param_value(self, param_key: str):
         assert self.params is not None and param_key in self.params
@@ -532,6 +491,7 @@ class _TorchDTypeMap:
 TORCH_DTYPE_MAP = _TorchDTypeMap()
 
 MODULE_ROOT = Path(__file__).resolve().parent
+CUSTOM_MODULE_ROOT = Path(shared.PROGRAM_PATH) / 'custom_modules'
 MODULE_SCRIPTS = {
     'translator': {
         'module_dir': str(MODULE_ROOT / 'translators'),
@@ -557,7 +517,9 @@ MODULE_SCRIPTS = {
     
 def import_module_registries(target_modules=None):
     # Eager import path kept for explicit compatibility/debug use only.
-    def _load_module(module_dir: str, module_package: str, module_pattern: str):
+    def _load_module(module_dir: str, module_package: str, module_pattern: str) -> None:
+        if not os.path.isdir(module_dir):
+            return
         modules = os.listdir(module_dir)
         pattern = re.compile(module_pattern)
         for module_name in modules:
@@ -575,6 +537,11 @@ def import_module_registries(target_modules=None):
 
     for k in target_modules:
         _load_module(**MODULE_SCRIPTS[k])
+        _load_module(
+            str(CUSTOM_MODULE_ROOT),
+            'custom_modules',
+            MODULE_SCRIPTS[k]['module_pattern'],
+        )
 
 
 def init_module_registries(target_modules=None):

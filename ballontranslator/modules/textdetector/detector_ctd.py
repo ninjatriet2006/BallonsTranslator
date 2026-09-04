@@ -22,19 +22,21 @@ class ComicTextDetector(TextDetectorBase):
         'detect_size': {
             'type': 'selector',
             'options': [896, 1024, 1152, 1280], 
-            'value': 1280
+            'value': 1280,
+            'display_name': 'Detect Size'
         }, 
         'det_rearrange_max_batches': {
             'type': 'selector',
             'options': [1, 2, 4, 6, 8, 12, 16, 24, 32], 
-            'value': 4
+            'value': 4,
+            'display_name': 'Max split batch size'
         },
         'device': DEVICE_SELECTOR(),
         'description': 'ComicTextDetector',
         'font size multiplier': 1.,
         'font size max': -1,
         'font size min': -1,
-        'mask dilate size': 2
+        'mask dilate size': 3
     }
     _load_model_keys = {'model'}
     download_file_list = [

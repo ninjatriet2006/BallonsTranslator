@@ -1,7 +1,11 @@
-from typing import List, Tuple
+from typing import Callable, List, Mapping, Sequence, Tuple
 import json
 import os.path as osp
 import os
+import re
+import traceback
+
+from ballontranslator.utils.logger import logger as LOGGER
 
 HALF2FULL = {i: i + 0xFEE0 for i in range(0x21, 0x7F)}
 HALF2FULL[0x20] = 0x3000
@@ -15,11 +19,90 @@ LANGSET_CH = {'简体中文', '繁體中文'}
 
 PUNSET_RIGHT_ENG = {'.', '?', '!', ':', ';', ')', '}', "\""}
 PUNCTUATION_L = {'「', '『', '【', '《', '〈', '〔', '［', '｛', '（', '(', '[', '{', '“', '‘'}
+SENTENCE_TERMINATORS = frozenset('.!?。！？')
 
 PKUSEG_PUNCSET = {' ', '.', '　'}
 PKUSEGPATH = r'data/pkusegscores.json'
 PKUSEGSCORES = None
 CHSEG = None
+
+
+def substitute_keywords(
+    text: str,
+    substitutions: Sequence[Mapping],
+) -> str:
+    """Apply the persisted keyword-substitution rule format to one string.
+
+    >>> substitute_keywords('Hero and hero', [{
+    ...     'keyword': 'Hero', 'sub': 'Champion',
+    ...     'use_reg': False, 'case_sens': True,
+    ... }])
+    'Champion and hero'
+    >>> substitute_keywords('Hero returns', [{
+    ...     'keyword': 'hero', 'sub': 'Champion',
+    ...     'use_reg': False, 'case_sens': False,
+    ... }])
+    'Champion returns'
+    """
+
+    for index, substitution in enumerate(substitutions):
+        keyword = substitution['keyword']
+        if keyword == '':
+            continue
+
+        pattern = keyword
+        # Preserve the editor's regex, multiline, and case-sensitivity semantics.
+        flags = re.DOTALL
+        if not substitution['case_sens']:
+            flags |= re.IGNORECASE
+        if not substitution['use_reg']:
+            pattern = re.escape(pattern)
+        try:
+            text = re.sub(pattern, substitution['sub'], text, flags=flags)
+        except Exception:
+            LOGGER.error(
+                f'Invalid regex expression {pattern} at {index + 1}:'
+            )
+            LOGGER.error(traceback.format_exc())
+    return text
+
+
+def capitalize_sentences(text: str) -> str:
+    """Lowercase text, then uppercase each sentence's first letter.
+
+    >>> capitalize_sentences('hello WORLD. "next ONE!" final?')
+    'Hello world. "Next one!" Final?'
+    >>> capitalize_sentences('123 hello. 45 NEXT')
+    '123 Hello. 45 Next'
+    """
+
+    text = text.lower()
+    capitalize_next = True
+    result = []
+    for char in text:
+        if capitalize_next and char.isalpha():
+            char = char.upper()
+            capitalize_next = False
+        result.append(char)
+        if char in SENTENCE_TERMINATORS:
+            capitalize_next = True
+    return ''.join(result)
+
+
+def apply_letter_case(text: str, mode: str) -> str:
+    """Apply a persisted letter-case mode, tolerating unknown values.
+
+    >>> apply_letter_case('123 hELLO. nEXT!', 'capitalize')
+    '123 Hello. Next!'
+    >>> apply_letter_case('Hello', 'uppercase')
+    'HELLO'
+    """
+    if mode == 'capitalize':
+        return capitalize_sentences(text)
+    if mode == 'uppercase':
+        return text.upper()
+    return text
+
 
 def full_len(s: str):
     """
@@ -33,6 +116,41 @@ def half_len(s):
     Convert full-width characters to ASCII counterpart
     '''
     return s.translate(FULL2HALF)
+
+
+def finalize_translation_text(
+    text: str,
+    source_language: str,
+    target_language: str,
+    substitute: Callable[[str], str] = None,
+    letter_case: str = 'none',
+) -> str:
+    """Apply pure text finalization before translation completion is recorded.
+
+    >>> finalize_translation_text('Ａ! B', 'English', '简体中文')
+    'A!B'
+    >>> finalize_translation_text('ａｂｃ', '日本語', 'English', str.upper)
+    'ABC'
+    >>> finalize_translation_text(
+    ...     'hELLO WORLD. nEXT!', 'English', 'English',
+    ...     letter_case='capitalize')
+    'Hello world. Next!'
+    """
+    source_is_cjk = source_language in LANGSET_CJK
+    target_is_cjk = target_language in LANGSET_CJK
+    if target_is_cjk:
+        if source_is_cjk:
+            # text = full_len(text)
+            pass
+        else:
+            text = half_len(text)
+            text = re.sub(r'([?.!"])\s+', r'\1', text)
+    else:
+        text = half_len(text)
+
+    if substitute is not None:
+        text = substitute(text)
+    return apply_letter_case(text, letter_case)
 
 def seg_to_chars(text: str) -> List[str]:
     text = text.replace('\n', '')

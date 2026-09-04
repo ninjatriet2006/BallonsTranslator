@@ -1,28 +1,34 @@
-from qtpy.QtWidgets import QPushButton, QHBoxLayout, QLabel, QGroupBox, QScrollArea, QVBoxLayout, QSizePolicy
-from qtpy.QtCore import  Qt, Signal, QEvent
-from qtpy.QtGui import QFontMetrics, QFontMetrics, QIcon, QMouseEvent
+from qtpy.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+)
+from qtpy.QtCore import QCoreApplication, QEvent, Qt, Signal
+from qtpy.QtGui import QFontMetrics, QMouseEvent
 
 from .scrollbar import ScrollBar
 from .widget import Widget
+from ..icon_rendering import render_svg_pixmap
 from ..misc import themed_icon_path
 from ballontranslator.utils import shared
 from ballontranslator.utils.config import pcfg
 
-CHEVRON_SIZE = 20
+CHEVRON_SIZE = 12
 CHEVRON_SIZE_SMALL = 14
 
-def chevron_down():
-    return QIcon(themed_icon_path('chevron-down.svg')).pixmap(CHEVRON_SIZE, CHEVRON_SIZE, mode=QIcon.Mode.Normal)
 
-def chevron_right():
-    return QIcon(themed_icon_path('chevron-right.svg')).pixmap(CHEVRON_SIZE, CHEVRON_SIZE, mode=QIcon.Mode.Normal)
-
-def chevron_down_small():
-    return QIcon(themed_icon_path('chevron-down.svg')).pixmap(CHEVRON_SIZE_SMALL, CHEVRON_SIZE_SMALL, mode=QIcon.Mode.Normal)
-
-def chevron_right_small():
-    return QIcon(themed_icon_path('chevron-right.svg')).pixmap(CHEVRON_SIZE_SMALL, CHEVRON_SIZE_SMALL, mode=QIcon.Mode.Normal)
-
+def _chevron_pixmap(filename: str, size: int, device_pixel_ratio: float):
+    return render_svg_pixmap(
+        themed_icon_path(filename),
+        size,
+        size,
+        device_pixel_ratio,
+    )
 
 
 
@@ -48,16 +54,17 @@ class ExpandLabel(Widget):
             else:
                 font.setPointSizeF(10)
             self.setFixedHeight(26)
-            self.arrowlabel.setFixedSize(CHEVRON_SIZE, CHEVRON_SIZE)
+            self._chevron_size = CHEVRON_SIZE
         elif size_type == 'small':
             if shared.ON_MACOS:
                 font.setPointSize(10)
             else:
                 font.setPointSizeF(8)
             self.setFixedHeight(20)
-            self.arrowlabel.setFixedSize(CHEVRON_SIZE_SMALL, CHEVRON_SIZE_SMALL)
+            self._chevron_size = CHEVRON_SIZE_SMALL
         else:
             raise
+        self.arrowlabel.setFixedSize(self._chevron_size, self._chevron_size)
             
         self.textlabel.setFont(font)
         self.hidelabel = HidePanelButton(self)
@@ -67,9 +74,10 @@ class ExpandLabel(Widget):
             self.textlabel.setText(text)
         layout = QHBoxLayout(self)
         layout.addWidget(self.arrowlabel)
+        layout.addSpacing(3)
         layout.addWidget(self.textlabel)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(1)
+        layout.setSpacing(0)
         layout.addStretch(-1)
         layout.addWidget(self.hidelabel)
     
@@ -86,10 +94,14 @@ class ExpandLabel(Widget):
 
     def setExpand(self, expand: bool):
         self.expanded = expand
-        if expand:
-            self.arrowlabel.setPixmap(chevron_down())
-        else:
-            self.arrowlabel.setPixmap(chevron_right())
+        icon_name = 'chevron-down.svg' if expand else 'chevron-right.svg'
+        self.arrowlabel.setPixmap(
+            _chevron_pixmap(
+                icon_name,
+                self._chevron_size,
+                self.arrowlabel.devicePixelRatioF(),
+            )
+        )
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.Type.StyleChange:
@@ -108,6 +120,7 @@ class ExpandLabel(Widget):
 class PanelArea(QScrollArea):
     def __init__(self, panel_name: str, config_name: str, config_expand_name: str, action_name: str = None):
         super().__init__()
+        self._syncing_content_height = False
         self.scrollContent = PanelAreaContent()
         self.scrollContent.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self.setWidget(self.scrollContent)
@@ -136,6 +149,64 @@ class PanelArea(QScrollArea):
 
     def setContentLayout(self, layout):
         self.scrollContent.setLayout(layout)
+
+    def _sync_scroll_content_height(self, content_layout: QLayout) -> None:
+        """Expose a card layout's full height to the scroll area.
+
+        The content keeps its natural height even when the panel is constrained;
+        the panel's parent remains free to allocate less than its size hint.
+
+        >>> hasattr(PanelArea, '_sync_scroll_content_height')
+        True
+        """
+        if self._syncing_content_height:
+            return
+        self._syncing_content_height = True
+        try:
+            # Overlay scrollbars consume no layout width. The frame remains
+            # reliable while the viewport is still reporting its pre-show size.
+            content_width = max(1, self.width() - 2 * self.frameWidth())
+            self.scrollContent.resize(
+                content_width,
+                max(1, self.scrollContent.height()),
+            )
+            content_layout.invalidate()
+            # Give responsive children their final width before asking the
+            # layout for the height that width requires.
+            content_layout.activate()
+            content_height = (
+                content_layout.heightForWidth(content_width)
+                if content_layout.hasHeightForWidth()
+                else content_layout.sizeHint().height()
+            )
+            self.scrollContent.setMinimumHeight(content_height)
+            self.scrollContent.resize(
+                content_width,
+                max(content_height, self.viewport().height()),
+            )
+            content_layout.activate()
+            settled_height = (
+                content_layout.heightForWidth(content_width)
+                if content_layout.hasHeightForWidth()
+                else content_layout.sizeHint().height()
+            )
+            if settled_height != content_height:
+                self.scrollContent.setMinimumHeight(settled_height)
+                self.scrollContent.resize(
+                    content_width,
+                    max(settled_height, self.viewport().height()),
+                )
+                content_layout.activate()
+            self.scrollContent.updateGeometry()
+            self.updateGeometry()
+            self.view_widget.updateGeometry()
+            # A hidden resizable child does not always refresh QScrollArea's
+            # range after its minimum height changes.
+            QCoreApplication.sendEvent(
+                self, QEvent(QEvent.Type.LayoutRequest)
+            )
+        finally:
+            self._syncing_content_height = False
 
 
 class PanelGroupBox(QGroupBox):
