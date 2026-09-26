@@ -1,4 +1,3 @@
-from dataclasses import replace
 from typing import Iterable, Optional
 
 from qtpy.QtWidgets import (
@@ -15,17 +14,22 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qtpy.QtCore import QSignalBlocker, Signal, Qt
+from qtpy.QtCore import QElapsedTimer, QLocale, QModelIndex, QSignalBlocker, QTimer, Signal, Qt
 from qtpy.QtGui import (
     QActionGroup,
     QColor,
     QFocusEvent,
     QFont,
     QIcon,
+    QHideEvent,
     QKeyEvent,
+    QMouseEvent,
     QPainter,
+    QPaintEvent,
+    QShowEvent,
     QPen,
     QPixmap,
+    QStandardItemModel,
     QTextCursor,
 )
 
@@ -39,6 +43,7 @@ from ballontranslator.utils.fontformat import (
     font_weight_to_qt,
 )
 from ballontranslator.utils.font_registry import FontEntry
+from ballontranslator.utils.font_refresh import runtime_font_refresh_supported
 from ...custom_widget import (
     AlignmentChecker,
     CheckableLabel,
@@ -49,6 +54,8 @@ from ...custom_widget import (
     TextCheckerLabel,
     Widget,
 )
+from ...icon_rendering import render_svg_pixmap
+from ...misc import themed_icon_path
 from ..item import TextBlkItem
 from ..font_family import qfont_with_family
 from ..annotations import (
@@ -65,6 +72,7 @@ from ..transforms.edit_session import TextTransformEditSession
 from ..effects.edit_session import TextEffectEditSession
 from ..transforms.panel import TextTransformPanel
 from .presets import TextStylePresetPanel
+from .size_edit_session import FontSizeEditSession
 from .commands import (
     ffmt_change_font_family_and_weight,
     handle_ffmt_change,
@@ -378,12 +386,114 @@ class FormatGroupBtn(QFrame):
         hlayout.setSpacing(0)
         hlayout.setContentsMargins(8, 8, 8, 8)
 
-    def setItalic(self):
+    def setItalic(self) -> None:
         self.param_changed.emit('italic', self.italicBtn.isChecked())
 
-    def setUnderline(self):
+    def setUnderline(self) -> None:
         self.param_changed.emit('underline', self.underlineBtn.isChecked())
     
+
+class FontSizeComboBox(SizeComboBox):
+    """Commit typed sizes once; other size combo boxes retain live editing."""
+
+    def __init__(self, parent: QWidget) -> None:
+        self._dirty = False
+        self._committed_text = ''
+        super().__init__([1, 1000], 'font_size', parent)
+        # Presets and projected sizes use decimal points in every UI language.
+        locale = QLocale.c()
+        locale.setNumberOptions(QLocale.NumberOption.RejectGroupSeparator)
+        self.validator().setLocale(locale)
+        self.lineEdit().editingFinished.connect(self.finish_edit)
+
+    def on_text_changed(self) -> None:
+        if self.hasFocus():
+            # Re-entering the displayed size can unify a mixed-size selection.
+            self._dirty = True
+
+    def set_committed_text(self, text: str) -> None:
+        with QSignalBlocker(self):
+            self.setCurrentText(text)
+        self._committed_text = text
+        self._dirty = False
+
+    def focusInEvent(self, event: QFocusEvent) -> None:
+        if event.reason() != Qt.FocusReason.PopupFocusReason:
+            self._committed_text = self.currentText()
+            self._dirty = False
+        super().focusInEvent(event)
+
+    def finish_edit(self) -> None:
+        if not self._dirty:
+            return
+        self._dirty = False
+        if not self.lineEdit().hasAcceptableInput():
+            with QSignalBlocker(self):
+                self.setCurrentText(self._committed_text)
+            return
+        self._committed_text = self.currentText()
+        self.param_changed.emit(self.param_name, self.value())
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:
+        self.finish_edit()
+        super().focusOutEvent(event)
+
+    def on_current_index_changed(self) -> None:
+        self._dirty = self._dirty or self.currentText() != self._committed_text
+        self.finish_edit()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and self._dirty:
+            with QSignalBlocker(self):
+                self.setCurrentText(self._committed_text)
+            self._dirty = False
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class FontSizeDragLabel(SizeControlLabel):
+    drag_started = Signal()
+    drag_canceled = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent, transparent_bg=False)
+        self.setObjectName('fontSizeDragLabel')
+        self.setFixedSize(24, 24)
+        self.setToolTip(self.tr('Drag to resize text'))
+        self.setAccessibleName(self.tr('Resize text'))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_started.emit()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        changed = self._drag_changed
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and not changed:
+            self.btn_released.emit()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        self.cancel_drag()
+        event.accept()
+
+    def cancel_drag(self) -> None:
+        self.mouse_pressed = False
+        self._drag_changed = False
+        self.drag_canceled.emit()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.cancel_drag()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self.cancel_drag()
+        super().hideEvent(event)
+
 
 class FontSizeBox(QFrame):
     param_changed = Signal(str, float)
@@ -395,7 +505,8 @@ class FontSizeBox(QFrame):
         self.downBtn.setObjectName("FsizeIncrementDown")
         self.upBtn.clicked.connect(self.onUpBtnClicked)
         self.downBtn.clicked.connect(self.onDownBtnClicked)
-        self.fcombobox = SizeComboBox([1, 1000], 'font_size', self)
+        self.drag_label = FontSizeDragLabel(self)
+        self.fcombobox = FontSizeComboBox(self)
         self.fcombobox.setObjectName("FontFormatSizeBox")
         self.fcombobox.addItems([
             "5", "5.5", "6.5", "7.5", "8", "9", "10", "10.5",
@@ -410,8 +521,9 @@ class FontSizeBox(QFrame):
         vlayout.addWidget(self.downBtn)
         vlayout.setContentsMargins(0, 0, 0, 0)
         vlayout.setSpacing(0)
-        hlayout.addLayout(vlayout)
+        hlayout.addWidget(self.drag_label)
         hlayout.addWidget(self.fcombobox)
+        hlayout.addLayout(vlayout)
         hlayout.setSpacing(3)
         hlayout.setContentsMargins(0, 0, 0, 0)
 
@@ -419,6 +531,7 @@ class FontSizeBox(QFrame):
         return self.fcombobox.currentText()
 
     def _change_font_size(self, ratio: float) -> None:
+        self.fcombobox.finish_edit()
         size_text = self.getFontSize()
         multi_size = size_text.endswith('+')
         size = float(size_text[:-1] if multi_size else size_text)
@@ -430,8 +543,7 @@ class FontSizeBox(QFrame):
             return
 
         display_text = f'{new_size}+' if multi_size else str(new_size)
-        with QSignalBlocker(self.fcombobox):
-            self.fcombobox.setCurrentText(display_text)
+        self.fcombobox.set_committed_text(display_text)
         # The arrows are part of the editable size control. Keep focus on that
         # control so effects and the live text use the same unfocused layout.
         self.fcombobox.setFocus()
@@ -512,6 +624,23 @@ class FontWeightComboBox(QComboBox):
             self.set_weight(selected_weight)
 
 
+class FontFamilyModel(QStandardItemModel):
+    """Resolve system labels as Qt requests rows, not while filling the list."""
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+            entry = super().data(index, Qt.ItemDataRole.UserRole)
+            registry = getattr(shared, 'FONT_REGISTRY', None)
+            if isinstance(entry, FontEntry) and registry is not None:
+                # Autocomplete scans every EditRole even before user input.
+                # Only selected or displayed rows should open native fonts.
+                return registry.display_family(
+                    entry, resolve=(role == Qt.ItemDataRole.DisplayRole
+                                    or index.row() == self.parent().currentIndex()),
+                )
+        return super().data(index, role)
+
+
 class FontFamilyComboBox(QComboBox):
     param_changed = Signal(str, object)
 
@@ -519,6 +648,8 @@ class FontFamilyComboBox(QComboBox):
         super().__init__(*args, **kwargs)
         # Apply the compact selector before Qt caches a content-sized hint.
         self.setObjectName('FontFamilyBox')
+        self.setModel(FontFamilyModel(self))
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.setEditable(True)
         self.view().setUniformItemSizes(True)
         self.currentIndexChanged.connect(self.on_fontfamily_changed)
@@ -547,17 +678,10 @@ class FontFamilyComboBox(QComboBox):
             with QSignalBlocker(self):
                 self.set_current_family(self._last_valid_family)
 
-    def set_displayed_font(self, font_family: str) -> None:
-        """Show a family without changing the filtered popup model."""
-        index = self.findText(font_family)
-        self.setCurrentIndex(index)
-        if index < 0:
-            self.setEditText(font_family)
-
     def update_font_entries(self, entries: Iterable[FontEntry]) -> None:
         """Display localized entries and retain canonical storage values."""
         entries = list(entries)
-        current_family = self.current_storage_family()
+        current_family = self.current_storage_family() or self._last_valid_family or self.currentText().strip()
         self.currentIndexChanged.disconnect(self.on_fontfamily_changed)
         try:
             self.clear()
@@ -609,7 +733,8 @@ class FontFamilyComboBox(QComboBox):
                 self.setCurrentIndex(index)
                 self.lineEdit().setText(self.itemText(index))
                 return
-        self.set_displayed_font(family)
+        self.setCurrentIndex(-1)
+        self.setEditText(family)
 
     def current_entry(self) -> FontEntry | None:
         index = self.currentIndex()
@@ -669,7 +794,72 @@ class FontFamilyComboBox(QComboBox):
             self.apply_fontfamily()
 
 
+class FontReloadButton(QToolButton):
+    """Show the themed reload SVG and animate only while busy and visible.
+
+    >>> issubclass(FontReloadButton, QToolButton)
+    True
+    """
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName('FontReloadButton')
+        self._busy = False
+        self._angle = 0.0
+        self._elapsed = QElapsedTimer()
+        self._rotation_timer = QTimer(self)
+        self._rotation_timer.setInterval(30)
+        self._rotation_timer.timeout.connect(self._advance_rotation)
+        self.setAccessibleName(self.tr('Reload fonts'))
+
+    def set_busy(self, busy: bool) -> None:
+        if self._busy == busy:
+            return
+        self._busy = busy
+        self.setEnabled(not busy)
+        if busy and self.isVisible():
+            self._elapsed.start()
+            self._rotation_timer.start()
+        else:
+            self._rotation_timer.stop()
+        self._angle = 0.0
+        self.update()
+
+    def _advance_rotation(self) -> None:
+        self._angle = (self._elapsed.elapsed() % 900) * 360.0 / 900
+        self.update()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._busy:
+            self._elapsed.start()
+            self._rotation_timer.start()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self._rotation_timer.stop()
+        super().hideEvent(event)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        icon = (
+            'fontfmt_reload_activate.svg'
+            if self.isDown() and self.isEnabled()
+            else 'fontfmt_reload.svg'
+        )
+        pixmap = render_svg_pixmap(
+            themed_icon_path(icon), 20, 20, self.devicePixelRatioF(),
+        )
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self._angle)
+        if not self.isEnabled():
+            painter.setOpacity(0.45)
+        painter.drawPixmap(-10, -10, pixmap)
+        painter.end()
+
+
 class FontFormatPanel(Widget):
+    reload_fonts_requested = Signal()
     
     textblk_item: TextBlkItem = None
     text_cursor: QTextCursor = None
@@ -687,6 +877,12 @@ class FontFormatPanel(Widget):
         self.familybox.setToolTip(self.tr("Font Family"))
         self.familybox.param_changed.connect(self.on_font_family_changed)
         self.familybox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.reloadFontsButton = None
+        if runtime_font_refresh_supported():
+            self.reloadFontsButton = FontReloadButton(self)
+            self.reloadFontsButton.setToolTip(self.tr('Reload system fonts and fonts folder'))
+            self.reloadFontsButton.clicked.connect(self.reload_fonts_requested)
 
         self.fontWeightBox = FontWeightComboBox(self)
         self.fontWeightBox.setObjectName('FontWeightBox')
@@ -820,6 +1016,7 @@ class FontFormatPanel(Widget):
         self.text_effect_session = TextEffectEditSession(
             self, self.texteffect_panel
         )
+        self.font_size_session = FontSizeEditSession(self)
         self.alpha_mask_session = getattr(
             SW.canvas, 'alpha_mask_edit_session', None
         )
@@ -842,13 +1039,15 @@ class FontFormatPanel(Widget):
         vl0.setContentsMargins(0, 0, 0, 0)
         hl1 = QHBoxLayout()
         font_selector_layout = QHBoxLayout()
+        font_selector_layout.addWidget(self.colorPicker)
         font_selector_layout.addWidget(self.familybox, 1)
-        font_selector_layout.addWidget(self.fontWeightBox)
-        font_selector_layout.setSpacing(7)
+        if self.reloadFontsButton is not None:
+            font_selector_layout.addWidget(self.reloadFontsButton)
+        font_selector_layout.setSpacing(4)
         font_selector_layout.setContentsMargins(0, 0, 0, 0)
         hl1.addLayout(font_selector_layout, 1)
-        hl1.addWidget(self.fontsizebox)
-        hl1.setSpacing(4)
+        hl1.addWidget(self.fontWeightBox)
+        hl1.setSpacing(7)
         hl1.setContentsMargins(0, 11, 0, 0)
         hl2 = QHBoxLayout()
         hl2.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -865,10 +1064,10 @@ class FontFormatPanel(Widget):
         hl2.setContentsMargins(0, 0, 0, 0)
         hl3 = QHBoxLayout()
         hl3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hl3.addWidget(self.colorPicker)
+        hl3.addWidget(self.fontsizebox)
         hl3.addLayout(lettersp_hlayout)
         hl3.addLayout(linesp_hlayout)
-        hl3.setContentsMargins(3, 0, 3, 0)
+        hl3.setContentsMargins(3, FONTFORMAT_SPACING, 3, 0)
         hl3.setSpacing(12)
         hl4 = QHBoxLayout()
         hl4.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -883,8 +1082,8 @@ class FontFormatPanel(Widget):
 
         self.vlayout.addLayout(vl0)
         self.vlayout.addLayout(hl1)
-        self.vlayout.addLayout(hl2)
         self.vlayout.addLayout(hl3)
+        self.vlayout.addLayout(hl2)
         self.vlayout.addLayout(hl4)
         self.vlayout.setContentsMargins(0, 0, 6, 0)
         self.vlayout.setSpacing(0)
@@ -1095,6 +1294,8 @@ class FontFormatPanel(Widget):
         self._restore_ruby_edit_focus(item)
 
     def resolve_text_transform_edits_for_save(self) -> None:
+        self.font_size_session.cancel()
+        self.fontsizebox.fcombobox.finish_edit()
         if self.alpha_mask_session is not None:
             self.alpha_mask_session.resolve_for_save()
         self.text_transform_session.resolve_for_save()
@@ -1105,18 +1306,22 @@ class FontFormatPanel(Widget):
         self.text_effect_session.stop_image_generation(detach_card=True)
 
     def resolve_text_transform_edits_for_history_change(self) -> None:
+        self.font_size_session.cancel()
         if self.alpha_mask_session is not None:
             self.alpha_mask_session.resolve_for_history_change()
         self.text_transform_session.resolve_for_history_change()
         self.text_effect_session.resolve_for_history_change()
 
     def resolve_text_transform_edits_for_page_change(self) -> None:
+        self.font_size_session.cancel()
+        self.fontsizebox.fcombobox.finish_edit()
         if self.alpha_mask_session is not None:
             self.alpha_mask_session.resolve_for_page_change()
         self.text_effect_session.resolve_for_page_change()
         self.text_transform_session.resolve_for_page_change()
 
     def cancel_text_transform_edits_for_scene_change(self) -> None:
+        self.font_size_session.cancel()
         if self.alpha_mask_session is not None:
             self.alpha_mask_session.cancel_for_scene_change()
         self.text_effect_session.cancel_for_scene_change()
@@ -1171,11 +1376,11 @@ class FontFormatPanel(Widget):
             with QSignalBlocker(self.familybox):
                 self.familybox.set_current_family(font_format.font_family)
         if (
-            not preserve_focused_editors
-            or not self.fontsizebox.fcombobox.hasFocus()
+            self.font_size_session.start_text is None
+            and (not preserve_focused_editors
+                 or not self.fontsizebox.fcombobox.hasFocus())
         ):
-            with QSignalBlocker(self.fontsizebox.fcombobox):
-                self.fontsizebox.fcombobox.setCurrentText(font_size)
+            self.fontsizebox.fcombobox.set_committed_text(font_size)
         if not preserve_focused_editors or not self.fontWeightBox.hasFocus():
             self._sync_weight_options(font_format)
         foreground = tuple(font_format.foreground_color())
@@ -1344,6 +1549,9 @@ class FontFormatPanel(Widget):
                 effect_items = list(transform_items)
 
         if not preserve_local_owner:
+            if transform_items != self.text_transform_session.items:
+                self.font_size_session.cancel()
+                self.fontsizebox.fcombobox.finish_edit()
             # A real selection transition settles edits against the old target
             # list. A transient clear from a nested color dialog is not one.
             self.text_transform_session.finish_pending_edits()

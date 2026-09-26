@@ -18,7 +18,7 @@ RELEASES_URL = 'https://github.com/dmMaze/BallonsTranslator/releases'
 LATEST_RELEASE_API_URL = 'https://api.github.com/repos/dmMaze/BallonsTranslator/releases/latest'
 RELEASE_RESPONSE_CACHE_FILENAME = 'github_release_response.json'
 UPDATE_BRANCH = 'userspace_update'
-SOURCE_UPDATE_DIRS = ('ballontranslator', 'resources')
+SOURCE_UPDATE_DIRS = ('ballontranslator', 'resources', 'config/llm_profile_builtin', 'scripts')
 SOURCE_UPDATE_FILES = ('pyproject.toml', 'requirements.txt', 'launch_win.bat', 'launch.sh')
 
 
@@ -156,6 +156,8 @@ class BallonsTranslatorUpdater:
     'app'
     """
 
+    ENABLE_UPDATER: bool = False
+
     def __init__(
         self,
         program_path: str = None,
@@ -167,6 +169,13 @@ class BallonsTranslatorUpdater:
         self.progress_callback = progress_callback
 
     def check_and_update(self) -> UpdateResult:
+        if not self.ENABLE_UPDATER:
+            current_version = get_current_version(str(self.program_path))
+            return UpdateResult(
+                status='up_to_date',
+                current_version=current_version,
+                latest_version=current_version,
+            )
         result = self.check_latest_release()
         if result.status != 'available' or result.release_info is None:
             return result
@@ -180,6 +189,13 @@ class BallonsTranslatorUpdater:
         >>> isinstance(updater.program_path, Path)
         True
         """
+        if not self.ENABLE_UPDATER:
+            current_version = get_current_version(str(self.program_path))
+            return UpdateResult(
+                status='up_to_date',
+                current_version=current_version,
+                latest_version=current_version,
+            )
 
         return self._result_for_release(self.query_latest_release())
 
@@ -189,6 +205,13 @@ class BallonsTranslatorUpdater:
         Equal or older cached releases use the ``preview`` status so the UI
         can display their notes without offering an unsafe update action.
         """
+        if not self.ENABLE_UPDATER:
+            current_version = get_current_version(str(self.program_path))
+            return UpdateResult(
+                status='up_to_date',
+                current_version=current_version,
+                latest_version=current_version,
+            )
 
         result = self._result_for_release(self.query_cached_release())
         if result.status == 'up_to_date':
@@ -218,6 +241,12 @@ class BallonsTranslatorUpdater:
 
     def apply_update(self, release_info: ReleaseInfo, current_version: str = None) -> UpdateResult:
         current_version = current_version or get_current_version(str(self.program_path))
+        if not self.ENABLE_UPDATER:
+            return UpdateResult(
+                status='up_to_date',
+                current_version=current_version,
+                latest_version=current_version,
+            )
         self.backup_source()
         zip_path = self.download_source_zip(release_info)
         self.prepare_git_worktree(release_info.version)

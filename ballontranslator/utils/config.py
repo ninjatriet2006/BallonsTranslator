@@ -1,8 +1,8 @@
-import json, os, string, traceback
+import json, os, re, string, traceback
 import os.path as osp
 import copy
 from dataclasses import fields
-from typing import Callable, Mapping, Optional
+from typing import Mapping, Optional
 
 from . import shared
 from .fontformat import (
@@ -13,7 +13,14 @@ from .fontformat import (
 from .structures import List, Dict, Config, field, nested_dataclass
 from .logger import logger as LOGGER
 from .io_utils import json_dump_nested_obj, np, serialize_np
-from .llm_profiles import default_profiles, load_profiles, migrate_module_llm_profiles, profile_by_id, profile_to_dict, LLMProfile
+from .llm_profiles import (
+    LLMProfile,
+    default_profiles,
+    load_profiles,
+    migrate_module_llm_profiles,
+    profile_by_id,
+    profile_to_dict,
+)
 from .secret_store import SecretStore
 from .text_effects import without_project_raster_effects
 
@@ -89,6 +96,9 @@ class ModuleConfig(Config):
     # 是否在 OCR 后进行字体检测（默认不启用）
     ocr_font_detect: bool = False
     ocr_text_postprocess: str = OCRTextPostprocess.NONE
+    ocr_llm_page_level: bool = False
+    ocr_llm_mask_non_text: bool = True
+    ocr_llm_sort_reading_order: bool = True
     textdetector_params: Dict = field(default_factory=lambda: dict())
     ocr_params: Dict = field(default_factory=lambda: dict())
     translator_params: Dict = field(default_factory=lambda: dict())
@@ -104,6 +114,9 @@ class ModuleConfig(Config):
     llm_prior_context_token_budget: int = 4096
     llm_glossary_path: str = ''
     llm_glossary_mode: str = LLMGlossaryMode.Matching
+    llm_translate_vision: bool = False
+    llm_translate_summary_memory: bool = False
+    llm_translate_overwrite_summary: bool = False
 
     check_need_inpaint: bool = True
     empty_runcache: bool = False
@@ -184,6 +197,19 @@ class ModuleConfig(Config):
         return (self.enable_detect or self.enable_ocr or self.enable_translate or self.enable_inpaint) is False
 
     def __post_init__(self):
+        for setting_name, default in (
+            ('ocr_llm_page_level', False),
+            ('ocr_llm_mask_non_text', True),
+            ('ocr_llm_sort_reading_order', True),
+            ('llm_translate_vision', False),
+            ('llm_translate_summary_memory', False),
+            ('llm_translate_overwrite_summary', False),
+        ):
+            if type(getattr(self, setting_name)) is not bool:
+                LOGGER.warning(
+                    f'Discard invalid module.{setting_name} config: expected a boolean.'
+                )
+                setattr(self, setting_name, default)
         if self.ocr_text_postprocess not in OCRTextPostprocess.Valid:
             self.ocr_text_postprocess = OCRTextPostprocess.NONE
         if self.translate_context not in TranslateContext.Valid:
@@ -221,15 +247,47 @@ class ModuleConfig(Config):
 
 @nested_dataclass
 class DrawPanelConfig(Config):
+    """Recover optional drawing settings independently when loading saved data.
+
+    >>> DrawPanelConfig().magicwand_tolerance
+    32
+    """
+
     pentool_color: List = field(default_factory=lambda: [0, 0, 0])
     pentool_width: float = 30.
     pentool_shape: int = 0
     inpainter_width: float = 30.
     inpainter_shape: int = 0
+    magicwand_tolerance: int = 32
+    magicwand_range: int = 0
+    magicwand_fill_mode: int = 0
     current_tool: int = 0
     rectool_auto: bool = False
     rectool_method: int = 0
     recttool_dilate_ksize: int = 2
+
+    def __post_init__(self) -> None:
+        for name, default, minimum, maximum in (
+            ('inpainter_shape', 0, 0, 2),
+            ('magicwand_tolerance', 32, 0, 255),
+            ('magicwand_range', 0, -50, 50),
+            ('magicwand_fill_mode', 0, 0, 2),
+        ):
+            raw = getattr(self, name)
+            try:
+                value = int(raw)
+                if isinstance(raw, float) and raw != value:
+                    raise ValueError('Expected an integer.')
+            except (TypeError, ValueError, OverflowError):
+                LOGGER.warning('Discard invalid drawpanel.%s %r.', name, raw)
+                value = default
+            if not minimum <= value <= maximum:
+                LOGGER.warning('Discard out-of-range drawpanel.%s %r.', name, raw)
+                value = (
+                    default if name in ('inpainter_shape', 'magicwand_fill_mode')
+                    else min(max(value, minimum), maximum)
+                )
+            setattr(self, name, value)
 
 @nested_dataclass
 class PackageManagerConfig(Config):
@@ -296,13 +354,17 @@ class ProgramConfig(Config):
     global_fontformat: FontFormat = field(default_factory=lambda: FontFormat())
     recent_proj_list: List = field(default_factory=lambda: list())
     show_page_list: bool = False
+    show_llm_page_summary: bool = True
+    expand_llm_page_summary: bool = True
+    show_llm_compact_memory: bool = True
+    expand_llm_compact_memory: bool = True
     imgtrans_paintmode: bool = False
     imgtrans_textedit: bool = True
     imgtrans_textblock: bool = True
     mask_transparency: float = 0.
     original_transparency: float = 0.
     open_recent_on_startup: bool = True 
-    check_update_on_startup: bool = True
+    check_update_on_startup: bool = False
     spellcheck_enabled: bool = False
     spellcheck_external_dict_path: str = ""
     spellcheck_repo_dicts: str = ""
@@ -359,6 +421,7 @@ class ProgramConfig(Config):
     text_transform_panel: bool = True
     expand_ttransform_panel: bool = True
     excluded_fonts: List[str] = field(default_factory=list)
+    custom_colors: List[str] = field(default_factory=list)
 
     @staticmethod
     def load(cfg_path: str):
@@ -394,6 +457,27 @@ class ProgramConfig(Config):
                     )
                 config_dict['excluded_fonts'] = normalized_fonts
 
+        if 'custom_colors' in config_dict:
+            custom_colors = config_dict['custom_colors']
+            if not isinstance(custom_colors, list):
+                LOGGER.warning(
+                    'Discard invalid custom_colors config: expected a list of colors.'
+                )
+                config_dict.pop('custom_colors')
+            else:
+                valid_colors = []
+                for color in custom_colors:
+                    if isinstance(color, str) and re.fullmatch(
+                        r'#[0-9a-fA-F]{6}', color
+                    ):
+                        valid_colors.append(color)
+                    else:
+                        LOGGER.warning(
+                            'Discard invalid entry in custom_colors config: %r.',
+                            color,
+                        )
+                config_dict['custom_colors'] = valid_colors
+
         if 'module' in config_dict:
             module_cfg = config_dict['module']
             if 'translate_context' not in module_cfg and 'translate_by_textblock' in module_cfg:
@@ -408,7 +492,6 @@ class ProgramConfig(Config):
                 params = module_cfg['textdetector_params']
                 if 'rtdetr_v2' in params:
                     params['ctbd'] = params.pop('rtdetr_v2')
-            # LLM translator keys must be consumed before module-param patching drops unknown keys.
             migrate_module_llm_profiles(module_cfg)
 
         effect_notices = set()
@@ -472,7 +555,7 @@ def load_textstyle_from(p: str, raise_exception = False):
                         )
                         style_format.text_effects = portable_effects
                     styles_loaded.append(style_format)
-                except Exception as e:
+                except Exception:
                     LOGGER.warning(f'Skip invalid text style: {style}')
             warn_ignored_legacy_effects(effect_notices, 'text styles')
     except Exception as e:

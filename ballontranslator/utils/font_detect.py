@@ -4,6 +4,8 @@ import os
 import hashlib
 import logging
 import sys
+import pickle
+import types
 
 from typing import Tuple
 from typing import Dict
@@ -88,6 +90,24 @@ def _clean_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, tor
         new_sd[new_k] = v
     return new_sd
 
+class _DummyDSFont:
+    path: str = ''
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+    def __setstate__(self, state):
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+        elif isinstance(state, tuple) and len(state) == 2 and isinstance(state[1], dict):
+            self.__dict__.update(state[1])
+
+
+class _FontCacheUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str):
+        if 'font_dataset' in module:
+            return _DummyDSFont
+        return super().find_class(module, name)
+
+
 def prepare_fonts(cache_path: str = None):
     """Load font list from cache file"""
     try:
@@ -95,9 +115,21 @@ def prepare_fonts(cache_path: str = None):
             if YUZUMARKER_DIR not in sys.path:
                 sys.path.insert(0, YUZUMARKER_DIR)
             
+            if 'font_dataset' not in sys.modules:
+                import types
+                mod_ds = types.ModuleType('font_dataset')
+                mod_font = types.ModuleType('font_dataset.font')
+                mod_font.DSFont = _DummyDSFont
+                mod_ds.font = mod_font
+                sys.modules['font_dataset'] = mod_ds
+                sys.modules['font_dataset.font'] = mod_font
+
             with open(cache_path, 'rb') as f:
-                import pickle
-                font_objects = pickle.load(f)
+                try:
+                    font_objects = _FontCacheUnpickler(f).load()
+                except Exception:
+                    f.seek(0)
+                    font_objects = pickle.load(f)
                 
                 # Convert font objects to their path strings
                 font_list = []

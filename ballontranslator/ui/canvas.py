@@ -4,7 +4,7 @@ import os
 
 from qtpy.QtWidgets import QApplication, QSlider, QMenu, QGraphicsScene, QGraphicsSceneDragDropEvent , QGraphicsView, QGraphicsSceneDragDropEvent, QGraphicsRectItem, QGraphicsItem, QScrollBar, QGraphicsPixmapItem, QGraphicsSceneMouseEvent, QGraphicsSceneContextMenuEvent, QRubberBand
 from qtpy.QtCore import Qt, QDateTime, QRectF, QPointF, QPoint, Signal, QSize, QSizeF, QEvent, QTimer
-from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent
+from qtpy.QtGui import QKeySequence, QPixmap, QImage, QHideEvent, QKeyEvent, QMouseEvent, QWheelEvent, QResizeEvent, QPainter, QPen, QPainterPath, QCursor, QNativeGestureEvent
 from qtpy.QtWidgets import QGraphicsPathItem
 from qtpy.QtCore import QLineF
 from qtpy.QtGui import QColor, QPainterPathStroker
@@ -24,7 +24,7 @@ from .text_engine.transforms.grid_control import TextGridTransformControl
 from .text_engine.transforms.projective_control import TextProjectiveTransformControl
 from .text_engine.effects.alpha_mask_edit_session import TextAlphaMaskEditSession
 from .custom_widget import ScrollBar, FadeLabel
-from .image_edit import ImageEditMode, DrawingLayer, StrokeImgItem
+from .image_edit import ImageEditMode, DrawingLayer, StrokeImgItem, PenShape
 from .page_search_widget import PageSearchWidget
 from .text_engine.editing.commands import MoveByKeyCommand
 from ballontranslator.utils import shared
@@ -82,6 +82,8 @@ class CustomGV(QGraphicsView):
     view_resized = Signal()
     hide_canvas = Signal()
     ctrl_released = Signal()
+    magic_wand_hover = Signal(QPointF)
+    magic_wand_hover_left = Signal()
     canvas: Optional["Canvas"] = None
 
     def __init__(self, parent=None):
@@ -91,6 +93,25 @@ class CustomGV(QGraphicsView):
 
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        canvas = self.canvas
+        if canvas is not None and canvas._magic_wand_hover_enabled:
+            etype = event.type()
+            if etype in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
+                if (
+                    not isinstance(event, QMouseEvent)
+                    or event.buttons() == Qt.MouseButton.NoButton
+                ):
+                    pos = (
+                        event.position().toPoint()
+                        if hasattr(event, 'position')
+                        else event.pos()
+                    )
+                    self.magic_wand_hover.emit(self.mapToScene(pos))
+            elif etype == QEvent.Type.Leave:
+                self.magic_wand_hover_left.emit()
+        return super().viewportEvent(event)
 
     def wheelEvent(self, event : QWheelEvent) -> None:
         # qgraphicsview always scroll content according to wheelevent
@@ -118,17 +139,14 @@ class CustomGV(QGraphicsView):
             return super().keyPressEvent(e)
 
         modifiers = e.modifiers()
-        if modifiers == Qt.KeyboardModifier.ControlModifier:
-            if key == QKEY.Key_V:
-                # self.ctrlv_pressed.emit(e)
-                if self.canvas.handle_ctrlv():
-                    e.accept()
-                    return
-            if key == QKEY.Key_C:
-                if self.canvas.handle_ctrlc():
-                    e.accept()
-                    return
-                
+        if e.matches(QKeySequence.StandardKey.Paste):
+            if self.canvas.handle_ctrlv():
+                e.accept()
+                return
+        elif e.matches(QKeySequence.StandardKey.Copy):
+            if self.canvas.handle_ctrlc():
+                e.accept()
+                return
         elif modifiers & Qt.KeyboardModifier.ControlModifier and modifiers & Qt.KeyboardModifier.ShiftModifier:
             if key == QKEY.Key_C:
                 self.canvas.copy_src_signal.emit()
@@ -192,6 +210,8 @@ class Canvas(QGraphicsScene):
     begin_scale_tool = Signal(QPointF)
     scale_tool = Signal(QPointF)
     end_scale_tool = Signal()
+    magic_wand_clicked = Signal(QPointF, bool)
+    image_layers_updated = Signal()
     canvas_undostack_changed = Signal()
     
     imgtrans_proj: ProjImgTrans = None
@@ -237,6 +257,9 @@ class Canvas(QGraphicsScene):
         self.gv.hide_canvas.connect(self.on_hide_canvas)
         self.gv.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.gv.canvas = self
+        self._magic_wand_hover_enabled = False
+        self.magic_wand_hover = self.gv.magic_wand_hover
+        self.magic_wand_hover_left = self.gv.magic_wand_hover_left
         self.gv.setAcceptDrops(True)
         self.gv.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -626,6 +649,7 @@ class Canvas(QGraphicsScene):
 
         painter.end()
         self.inpaintLayer.setPixmap(pixmap)
+        self.image_layers_updated.emit()
 
     def setMaskTransparency(self, transparency: float):
         pcfg.mask_transparency = transparency
@@ -803,6 +827,8 @@ class Canvas(QGraphicsScene):
             self.updateLayers()
 
     def addStrokeImageItem(self, pos: QPointF, pen: QPen, erasing: bool = False):
+        if self.painting_shape == PenShape.MagicWand:
+            return
         if self.stroke_img_item is not None:
             self.stroke_img_item.startNewPoint(pos)
         else:
@@ -1055,6 +1081,11 @@ class Canvas(QGraphicsScene):
         
         elif self.scale_tool_mode:
             self.scale_tool.emit(event.scenePos())
+        elif (
+            self._magic_wand_hover_enabled
+            and event.buttons() == Qt.MouseButton.NoButton
+        ):
+            self.magic_wand_hover.emit(event.scenePos())
         
         result = super().mouseMoveEvent(event)
         if self._text_creation_cursor_active:
@@ -1173,12 +1204,20 @@ class Canvas(QGraphicsScene):
                 # user is drawing using the pen/inpainting tool
                 if self.scale_tool_mode:
                     self.begin_scale_tool.emit(event.scenePos())
+                elif self.painting and self.painting_shape == PenShape.MagicWand:
+                    self.magic_wand_clicked.emit(event.scenePos(), False)
+                    event.accept()
+                    return
                 elif self.painting:
                     self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.painting_pen)
 
             elif btn == Qt.MouseButton.RightButton:
                 # user is drawing using eraser
-                if self.painting:
+                if self.painting and self.painting_shape == PenShape.MagicWand:
+                    self.magic_wand_clicked.emit(event.scenePos(), True)
+                    event.accept()
+                    return
+                elif self.painting:
                     erasing = self.image_edit_mode == ImageEditMode.PenTool
                     self.addStrokeImageItem(self.inpaintLayer.mapFromScene(event.scenePos()), self.erasing_pen, erasing)
                 else:   # rubber band selection
@@ -1377,6 +1416,17 @@ class Canvas(QGraphicsScene):
         else:
             drawing_map = img
         self.drawingLayer.setPixmap(drawing_map)
+
+    def set_magic_wand_hover_tracking(self, enabled: bool) -> None:
+        # Keep QGraphicsView mouse tracking on so item hover cursors still work.
+        self._magic_wand_hover_enabled = bool(enabled)
+        if enabled:
+            self.gv.setMouseTracking(True)
+            viewport = self.gv.viewport()
+            if viewport is not None:
+                viewport.setMouseTracking(True)
+        else:
+            self.gv.magic_wand_hover_left.emit()
 
     def setPaintMode(self, painting: bool) -> None:
         self.alpha_mask_edit_session.deactivate()

@@ -7,9 +7,9 @@ from functools import partial
 import time
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QWidget, QColorDialog
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
-from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QPainter, QClipboard
+from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QPainter, QClipboard, QColor
 
 from ballontranslator.utils.logger import logger as LOGGER
 from ballontranslator.utils.text_processing import is_cjk
@@ -51,10 +51,13 @@ from .mainwindowbars import TitleBar, LeftBar, BottomBar
 from .menu_style import install_app_style_filters
 from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread
 from .update_thread import UpdateCheckThread
+from .font_change_detection import FontChangeDetector
+from .font_refresh import FontRefreshController
 from .update_dialog import UpdateReleaseDialog
 from .run_pipeline_dialog import RunPipelineDialog
-from .custom_widget import Widget, ViewWidget
+from .custom_widget import ScrollBar, Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
+from .llm_context_editor import LLMContextEditor
 from .text_engine.editing.commands import GlobalRepalceAllCommand
 from .text_engine.transforms.grid import start_grid_numba_warmup
 from .text_engine.effects.paint import (
@@ -71,6 +74,21 @@ from .module_parse_widgets import ModuleParamDialog
 from . import shared_widget as SW
 from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMessageBox, ProgressMessageBox
 
+
+def _restore_custom_colors(colors: List[str]) -> None:
+    for index, color_name in enumerate(colors[:QColorDialog.customCount()]):
+        color = QColor(color_name)
+        if color.isValid():
+            QColorDialog.setCustomColor(index, color)
+
+
+def _current_custom_colors() -> List[str]:
+    return [
+        QColorDialog.customColor(index).name()
+        for index in range(QColorDialog.customCount())
+    ]
+
+
 class PageListView(QListWidget):
 
     reveal_file = Signal()
@@ -78,6 +96,17 @@ class PageListView(QListWidget):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.setIconSize(QSize(shared.PAGELIST_THUMBNAIL_SIZE, shared.PAGELIST_THUMBNAIL_SIZE))
+        self.scrollbar_h = ScrollBar(
+            Qt.Orientation.Horizontal, self, fadeout=True
+        )
+        # QListWidget only calculates horizontal overflow with this policy.
+        self.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.horizontalScrollBar().hide()
+        self.scrollbar_v = ScrollBar(
+            Qt.Orientation.Vertical, self, fadeout=True
+        )
 
     def contextMenuEvent(self, e: QContextMenuEvent):
         menu = QMenu()
@@ -112,6 +141,7 @@ class MainWindow(mainwindow_cls):
         super().__init__()
 
         self.app = app
+        _restore_custom_colors(pcfg.custom_colors)
         install_app_style_filters(self.app)
         self.resetStyleSheet()
 
@@ -132,6 +162,7 @@ class MainWindow(mainwindow_cls):
         self._run_imgtrans_wo_textstyle_update = False
         self._render_only = False
         self._render_global_format = None
+        self._llm_context_dirty = False
 
         self.setupThread()
         self.setupUi()
@@ -226,7 +257,6 @@ class MainWindow(mainwindow_cls):
 
         self.leftBar = LeftBar(self)
         self.leftBar.showPageListLabel.clicked.connect(self.pageLabelStateChanged)
-        self.leftBar.imgTransChecked.connect(self.setupImgTransUI)
         self.leftBar.configChecked.connect(self.setupConfigUI)
         self.leftBar.globalSearchChecker.clicked.connect(self.on_set_gsearch_widget)
         self.leftBar.open_dir.connect(self.OpenProj)
@@ -243,7 +273,6 @@ class MainWindow(mainwindow_cls):
         self.pageList = PageListView()
         self.pageList.setObjectName('PageListArea')
         self.pageList.reveal_file.connect(self.on_reveal_file)
-        self.pageList.setHidden(True)
         self.pageList.currentItemChanged.connect(self.pageListCurrentItemChanged)
 
         self.leftStackWidget = QStackedWidget(self)
@@ -255,6 +284,17 @@ class MainWindow(mainwindow_cls):
         self.imsave_thread.img_writed.connect(self.global_search_widget.on_img_writed)
         self.global_search_widget.search_tree.result_item_clicked.connect(self.on_search_result_item_clicked)
         self.leftStackWidget.addWidget(self.global_search_widget)
+
+        self.llmContextEditor = LLMContextEditor(
+            project=self.imgtrans_proj,
+            page_widget=self.leftStackWidget,
+            parent=self,
+        )
+        self.llmContextEditor.register_views()
+        self.llmContextEditor.project_changed.connect(
+            self.on_llm_context_project_changed
+        )
+        self.llmContextEditor.hide()
         
         self.centralStackWidget = QStackedWidget(self)
         
@@ -275,6 +315,9 @@ class MainWindow(mainwindow_cls):
         # set up canvas
         SW.canvas = self.canvas = Canvas()
         self.canvas.imgtrans_proj = self.imgtrans_proj
+        self.llmContextEditor.set_summary_command_pusher(
+            self.canvas.push_text_command
+        )
         self.canvas.gv.hide_canvas.connect(self.onHideCanvas)
         self.canvas.proj_savestate_changed.connect(self.on_savestate_changed)
         self.canvas.textstack_changed.connect(self.on_textstack_changed)
@@ -323,7 +366,9 @@ class MainWindow(mainwindow_cls):
         self.rightComicTransStackPanel.currentChanged.connect(self.on_transpanel_changed)
 
         self.comicTransSplitter = QSplitter(Qt.Orientation.Horizontal)
-        self.comicTransSplitter.addWidget(self.leftStackWidget)
+        self.comicTransSplitter.setObjectName('ComicTransSplitter')
+        self.comicTransSplitter.setHandleWidth(5)
+        self.comicTransSplitter.addWidget(self.llmContextEditor)
         self.comicTransSplitter.addWidget(self.canvas.gv)
         self.comicTransSplitter.addWidget(self.rightComicTransStackPanel)
 
@@ -440,6 +485,9 @@ class MainWindow(mainwindow_cls):
         )
         module_manager.module_selection_changed.connect(self.on_module_selection_changed)
         module_manager.progress_msgbox.showed.connect(self.on_imgtrans_progressbox_showed)
+        module_manager.progress_msgbox.showed.connect(
+            self.llmContextEditor.close_bulk_summary_editor
+        )
         # Preparation and RUN dialogs share placement so the first RUN is stable.
         module_manager.prepare_msgbox.showed.connect(self.on_imgtrans_progressbox_showed)
         module_manager.blktrans_pipeline_finished.connect(self.on_blktrans_finished)
@@ -483,9 +531,11 @@ class MainWindow(mainwindow_cls):
         self.drawingPanel.maskTransperancySlider.setValue(int(pcfg.mask_transparency * 100))
         self.leftBar.initRecentProjMenu(pcfg.recent_proj_list)
         self.leftBar.showPageListLabel.setChecked(pcfg.show_page_list)
+        self._set_left_panel_content(
+            self.pageList if pcfg.show_page_list else None
+        )
         self.updatePageList()
         self.leftBar.save_config.connect(self.save_config)
-        self.leftBar.imgTransChecker.setChecked(True)
         self.st_manager.formatpanel.global_format = pcfg.global_fontformat
         self.st_manager.formatpanel.set_active_format(pcfg.global_fontformat)
         
@@ -521,6 +571,22 @@ class MainWindow(mainwindow_cls):
             self.apply_auto_tate_chu_yoko_to_project
         )
         self.on_show_only_custom_font(pcfg.let_show_only_custom_fonts_flag)
+        self.font_refresh = FontRefreshController(self)
+        self.font_change_detector = None
+        if self.font_refresh.enabled:
+            self.font_change_detector = FontChangeDetector(self)
+            self.font_change_detector.system_fonts_changed.connect(
+                self.font_refresh.request_system_refresh
+            )
+            self.font_change_detector.qt_database_changed.connect(
+                self.font_refresh.request_database_sync
+            )
+        self.font_refresh.refreshed.connect(self.on_fonts_refreshed)
+        self.font_refresh.busy_changed.connect(self.on_font_refresh_busy)
+        self.font_refresh.status_changed.connect(self.on_font_refresh_status)
+        self.textPanel.formatpanel.reload_fonts_requested.connect(
+            self.font_refresh.request_manual_refresh
+        )
 
         textblock_mode = pcfg.imgtrans_textblock
         if pcfg.imgtrans_textedit:
@@ -565,16 +631,15 @@ class MainWindow(mainwindow_cls):
             pcfg.mt_sublist = []
             self.mtSubWidget.loadCfgSublist(pcfg.mt_sublist)
 
-    def setupImgTransUI(self):
-        self.centralStackWidget.setCurrentIndex(0)
-        if self.leftBar.needleftStackWidget():
-            self.leftStackWidget.show()
-        else:
-            self.leftStackWidget.hide()
-
-    def setupConfigUI(self):
-        self.centralStackWidget.setCurrentIndex(0)
+    def setupConfigUI(self) -> None:
         self.configPanel.showConfigDialog()
+
+    def on_llm_context_project_changed(self) -> None:
+        """Join editor changes to the window's normal project-save flow."""
+        if self._llm_context_dirty:
+            return
+        self._llm_context_dirty = True
+        self.canvas.setProjSaveState(True)
 
     def check_for_updates(self, manual: bool = True, show_release_info: bool = False):
         if self.update_thread.isBusy():
@@ -696,6 +761,21 @@ class MainWindow(mainwindow_cls):
             pcfg.text_styles_path = text_style_path
             save_text_styles()
 
+    def on_fonts_refreshed(self) -> None:
+        for item in self.st_manager.textblk_item_list:
+            item.refresh_font_metrics()
+        self.on_show_only_custom_font(pcfg.let_show_only_custom_fonts_flag)
+
+    def on_font_refresh_status(self, label: str, detail: str) -> None:
+        button = self.textPanel.formatpanel.reloadFontsButton
+        if button is not None:
+            button.setToolTip(detail)
+
+    def on_font_refresh_busy(self, busy: bool) -> None:
+        button = self.textPanel.formatpanel.reloadFontsButton
+        if button is not None:
+            button.set_busy(busy)
+
     def on_show_only_custom_font(self, only_custom: bool) -> None:
         registry = shared.FONT_REGISTRY
         entries = registry.entries(only_custom, pcfg.excluded_fonts)
@@ -714,6 +794,7 @@ class MainWindow(mainwindow_cls):
             self.canvas.clear_undostack(update_saved_step=True)
             self.titleBar.setTitleContent(osp.basename(directory))
             self.updatePageList()
+            self._llm_context_dirty = False
             self.opening_dir = False
         except Exception as e:
             self.opening_dir = False
@@ -759,6 +840,7 @@ class MainWindow(mainwindow_cls):
             self.leftBar.updateRecentProjList(self.imgtrans_proj.proj_path)
             self.updatePageList()
             self.titleBar.setTitleContent(osp.basename(self.imgtrans_proj.proj_path))
+            self._llm_context_dirty = False
             self.opening_dir = False
         except Exception as e:
             self.opening_dir = False
@@ -777,21 +859,39 @@ class MainWindow(mainwindow_cls):
             self.pageList.addItem(lstitem)
             if imgname == self.imgtrans_proj.current_img:
                 self.pageList.setCurrentItem(lstitem)
+        self.llmContextEditor.set_project(self.imgtrans_proj)
 
-    def pageLabelStateChanged(self):
+    def _set_left_panel_content(
+        self,
+        content: Optional[QWidget],
+    ) -> None:
+        if content is None:
+            self.llmContextEditor.hide()
+            return
+        self.leftStackWidget.setCurrentWidget(content)
+        self._sync_llm_context_editor_visibility()
+        self.llmContextEditor.show()
+
+    def _sync_llm_context_editor_visibility(self) -> None:
+        self.llmContextEditor.set_context_visible(
+            self.leftStackWidget.currentWidget() is self.pageList
+        )
+
+    def pageLabelStateChanged(self) -> None:
         setup = self.leftBar.showPageListLabel.isChecked()
         if setup:
-            if self.leftStackWidget.isHidden():
-                self.leftStackWidget.show()
             if self.leftBar.globalSearchChecker.isChecked():
                 self.leftBar.globalSearchChecker.setChecked(False)
-            self.leftStackWidget.setCurrentWidget(self.pageList)
+            self._set_left_panel_content(self.pageList)
         else:
-            self.leftStackWidget.hide()
+            self._set_left_panel_content(None)
         pcfg.show_page_list = setup
         save_config()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self.font_change_detector is not None:
+            self.font_change_detector.stop()
+        self.font_refresh.shutdown()
         # Pending numeric edits are not dirty until they commit. Resolve them
         # before the close-time dirty check and final config snapshot.
         self.st_manager.formatpanel.resolve_text_transform_edits_for_save()
@@ -808,6 +908,7 @@ class MainWindow(mainwindow_cls):
         self.st_manager.hovering_transwidget = None
         self.st_manager.blockSignals(True)
         self.canvas.prepareClose()
+        pcfg.custom_colors = _current_custom_colors()
         self.save_config()
         return super().closeEvent(event)
 
@@ -839,8 +940,28 @@ class MainWindow(mainwindow_cls):
 
     def conditional_save(self, keep_exist_as_backup=False):
         if self.canvas.projstate_unsaved and not self.opening_dir:
-            update_scene_text = save_proj = self.canvas.text_change_unsaved()
-            save_rst_only = not self.canvas.draw_change_unsaved()
+            update_scene_text = self.canvas.text_change_unsaved()
+            draw_changed = self.canvas.draw_change_unsaved()
+            if (
+                self._llm_context_dirty
+                and not update_scene_text
+                and not draw_changed
+            ):
+                try:
+                    self.imgtrans_proj.save(
+                        keep_exist_as_backup=keep_exist_as_backup
+                    )
+                except Exception as error:
+                    LOGGER.error(
+                        'Failed to save LLM context edits: %s',
+                        error,
+                    )
+                    return
+                self._llm_context_dirty = False
+                self.canvas.setProjSaveState(False)
+                return
+            save_proj = update_scene_text or self._llm_context_dirty
+            save_rst_only = not draw_changed
             if not save_rst_only:
                 save_proj = True
             
@@ -860,6 +981,7 @@ class MainWindow(mainwindow_cls):
                 SceneTextReplacementReason.PAGE_CHANGE
             )
             self.imgtrans_proj.set_current_img(item.text())
+            self.llmContextEditor.set_page(item.text())
             self.canvas.clear_undostack(update_saved_step=True)
             self.canvas.updateCanvas()
             self.st_manager.populateSceneTextitems()
@@ -886,6 +1008,7 @@ class MainWindow(mainwindow_cls):
         self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
         self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
         self.titleBar.merge_tool_trigger.connect(self.on_open_merge_tool)
+        self.titleBar.ps_bridge_trigger.connect(self.on_open_photoshop_bridge)
         self.titleBar.path_reorder_trigger.connect(self.on_path_reorder)
         self.canvas.path_reorder_mode_changed.connect(
             self.titleBar.path_reorder_action.setChecked
@@ -1017,7 +1140,7 @@ class MainWindow(mainwindow_cls):
                 if self.drawingPanel.currentTool == self.drawingPanel.rectTool:
                     self.drawingPanel.rectPanel.inpaint_btn.click()
 
-    def shortcutBold(self):
+    def shortcutBold(self) -> None:
         if self.textPanel.formatpanel.isVisible():
             self.textPanel.formatpanel.toggle_bold()
 
@@ -1115,6 +1238,114 @@ class MainWindow(mainwindow_cls):
             self.merge_dialog.activateWindow()
         else:
             self.merge_dialog.show()
+
+    def on_open_photoshop_bridge(self):
+        """Open Photoshop Bridge & Tools dialog"""
+        if not hasattr(self, 'ps_bridge_dialog') or self.ps_bridge_dialog is None:
+            from .ps_bridge_dialog import PhotoshopBridgeDialog
+            self.ps_bridge_dialog = PhotoshopBridgeDialog(self, project=self.imgtrans_proj)
+        
+        self.ps_bridge_dialog.refresh_status()
+        if self.ps_bridge_dialog.isVisible():
+            self.ps_bridge_dialog.raise_()
+            self.ps_bridge_dialog.activateWindow()
+        else:
+            self.ps_bridge_dialog.show()
+
+    def prepare_photoshop_bridge_context(self) -> dict:
+        """Save current app state before Photoshop reads the project snapshot."""
+        from .ps_bridge_dialog import project_state_matches_disk
+
+        project = self.imgtrans_proj
+        if not project.proj_path:
+            raise RuntimeError(self.tr("No project is open."))
+        self.saveCurrentPage(
+            update_scene_text=True,
+            save_proj=True,
+            restore_interface=True,
+            save_rst_only=False,
+            keep_exist_as_backup=True,
+        )
+        if not project_state_matches_disk(project):
+            raise RuntimeError(
+                self.tr("The project could not be saved before opening Photoshop.")
+            )
+        return {
+            "project_path": project.proj_path,
+            "active_page": project.current_img or "",
+        }
+
+    def apply_photoshop_bridge_updates(self, payload: dict) -> int:
+        """Validate and persist Photoshop changes through project ownership."""
+        from .ps_bridge_dialog import (
+            project_state_matches_disk,
+            validate_photoshop_bridge_updates,
+        )
+
+        if self.canvas.projstate_unsaved:
+            raise RuntimeError(
+                self.tr(
+                    "BallonsTranslator has unsaved changes. Save them, then check "
+                    "for the Photoshop update again."
+                )
+            )
+        if not project_state_matches_disk(self.imgtrans_proj):
+            raise RuntimeError(
+                self.tr(
+                    "The project file changed outside BallonsTranslator. Reload it "
+                    "before applying Photoshop changes."
+                )
+            )
+
+        page_name, updates = validate_photoshop_bridge_updates(
+            self.imgtrans_proj,
+            payload,
+        )
+        changed = []
+        for block, translation, font_size in updates:
+            if (
+                block.translation != translation
+                or (font_size is not None and block.font_size != font_size)
+            ):
+                changed.append((block, translation, font_size))
+        if not changed:
+            return 0
+
+        old_values = [
+            (block, block.translation, block.rich_text, block.font_size)
+            for block, _, _ in changed
+        ]
+        for block, translation, font_size in changed:
+            if block.translation != translation:
+                block.translation = translation
+                # Rich HTML contains its own text and would otherwise hide the
+                # plain translation received from Photoshop.
+                block.rich_text = ""
+            if font_size is not None:
+                block.font_size = font_size
+
+        current_page_updated = page_name == self.imgtrans_proj.current_img
+        try:
+            if current_page_updated:
+                self.st_manager.updateSceneTextitems()
+            self.imgtrans_proj.save(keep_exist_as_backup=True)
+        except Exception as error:
+            for block, translation, rich_text, font_size in old_values:
+                block.translation = translation
+                block.rich_text = rich_text
+                block.font_size = font_size
+            if current_page_updated:
+                self.st_manager.updateSceneTextitems()
+            raise RuntimeError(
+                self.tr("Failed to save Photoshop changes: {error}").format(
+                    error=error
+                )
+            ) from error
+
+        if current_page_updated:
+            self.canvas.setProjSaveState(False)
+            self.canvas.update_saved_undostep()
+        return len(changed)
 
     def on_path_reorder(self, checked: bool) -> None:
         if not checked:
@@ -1367,9 +1598,8 @@ class MainWindow(mainwindow_cls):
         pcfg.imgtrans_textblock = mode
         self.st_manager.showTextblkItemRect(mode)
 
-    def manual_save(self):
-        if self.leftBar.imgTransChecker.isChecked()\
-            and self.imgtrans_proj.directory is not None:
+    def manual_save(self) -> None:
+        if self.imgtrans_proj.directory is not None:
             LOGGER.debug('Manually saving...')
             self.saveCurrentPage(update_scene_text=True, save_proj=True, restore_interface=True, save_rst_only=False)
 
@@ -1414,6 +1644,7 @@ class MainWindow(mainwindow_cls):
         if save_proj:
             try:
                 self.imgtrans_proj.save(keep_exist_as_backup=keep_exist_as_backup)
+                self._llm_context_dirty = False
                 if not save_rst_only:
                     mask_path = self.imgtrans_proj.get_mask_path()
                     mask_array = self.imgtrans_proj.mask_array
@@ -1818,12 +2049,20 @@ class MainWindow(mainwindow_cls):
         if page_index + 1 == self.imgtrans_proj.num_pages:
             self.st_manager.auto_textlayout_flag = False
 
+        self.llmContextEditor.refresh_context()
+
         # save proj file on page trans finished
         self.imgtrans_proj.save()
+        self._llm_context_dirty = False
 
         self.saveCurrentPage(False, False)
 
-    def on_savestate_changed(self, unsaved: bool):
+    def on_savestate_changed(self, unsaved: bool) -> None:
+        if not unsaved and self._llm_context_dirty:
+            # Canvas stack state and direct context edits are independent dirty
+            # sources; clearing one must not hide unsaved changes in the other.
+            self.canvas.setProjSaveState(True)
+            return
         save_state = self.tr('unsaved') if unsaved else self.tr('saved')
         self.titleBar.setTitleContent(save_state=save_state)
 
@@ -2149,15 +2388,13 @@ class MainWindow(mainwindow_cls):
             p = "\""+current_img_path+"\""
             subprocess.Popen("open -R "+p, shell=True)
 
-    def on_set_gsearch_widget(self):
+    def on_set_gsearch_widget(self) -> None:
         setup = self.leftBar.globalSearchChecker.isChecked()
         if setup:
-            if self.leftStackWidget.isHidden():
-                self.leftStackWidget.show()
             self.leftBar.showPageListLabel.setChecked(False)
-            self.leftStackWidget.setCurrentWidget(self.global_search_widget)
+            self._set_left_panel_content(self.global_search_widget)
         else:
-            self.leftStackWidget.hide()
+            self._set_left_panel_content(None)
 
     def on_fin_export_doc(self):
         msg = QMessageBox()
@@ -2420,6 +2657,7 @@ class MainWindow(mainwindow_cls):
             widget.set_expend_area(expend=getattr(pcfg, widget.config_expand_name), set_config=False)
             widget.view_hide_btn_clicked.connect(self.on_hide_view_widget)
             widget.setVisible(visible)
+        self._sync_llm_context_editor_visibility()
 
     def register_view_widget(self, widget: ViewWidget):
         assert widget.config_name not in shared.config_name_to_view_widget
@@ -2433,6 +2671,7 @@ class MainWindow(mainwindow_cls):
         widget: ViewWidget = shared.config_name_to_view_widget[cfg_name]['widget']
         widget.setVisible(show)
         setattr(pcfg, cfg_name, show)
+        self._sync_llm_context_editor_visibility()
 
     def on_hide_view_widget(self, cfg_name: str):
         d = shared.config_name_to_view_widget[cfg_name]
@@ -2441,3 +2680,4 @@ class MainWindow(mainwindow_cls):
         action: QAction = d['action']
         action.setChecked(False)
         setattr(pcfg, cfg_name, False)
+        self._sync_llm_context_editor_visibility()
