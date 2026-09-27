@@ -637,6 +637,15 @@ class BottomBar(Widget):
         self.hlayout.addWidget(self.ocr_selector)
         self.hlayout.addWidget(self.inpaint_selector)
         self.hlayout.addWidget(self.trans_selector)
+
+        self.error_badge = QPushButton(self)
+        self.error_badge.setObjectName('BottomBarErrorBadge')
+        self.error_badge.setText('Error (0)')
+        self.error_badge.setToolTip(self.tr('View pipeline issues and retry failed pages'))
+        self.error_badge.setVisible(False)
+        self.error_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hlayout.addWidget(self.error_badge)
+
         # self.hlayout.addWidget(self.translatorStatusbtn)
         # self.hlayout.addWidget(self.transTranspageBtn)
         # self.hlayout.addWidget(self.inpainterStatBtn)
@@ -665,3 +674,10 @@ class BottomBar(Widget):
 
     def onTextblockCheckerClicked(self):
         self.textblock_checkchanged.emit()
+
+    def update_error_count(self, count: int):
+        if count > 0:
+            self.error_badge.setText(f"{self.tr('Error')} ({count})")
+            self.error_badge.setVisible(True)
+        else:
+            self.error_badge.setVisible(False)

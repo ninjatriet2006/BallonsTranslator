@@ -68,7 +68,7 @@ from ballontranslator.modules import (
 )
 
 
-RUN_PIPELINE_DIALOG_WIDTH = 510
+RUN_PIPELINE_DIALOG_WIDTH = 540
 RUN_PIPELINE_SETTING_CONTROL_WIDTH = 100
 RUN_PIPELINE_GLOSSARY_DISPLAY_WIDTH = 100
 
@@ -356,10 +356,12 @@ class RunPipelineDialog(QDialog):
         parent: QWidget = None,
         project: ProjImgTrans = None,
         translator_metadata: dict = None,
+        current_page: int = None,
     ):
         super().__init__(parent)
         self.project = project
         self.translator_metadata = translator_metadata or {}
+        self.current_page = current_page
         self._app_event_filter_installed = False
         self._checkbox_settings: dict[QCheckBox, tuple[object, str]] = {}
         self.setObjectName('RunPipelineDialog')
@@ -707,6 +709,7 @@ class RunPipelineDialog(QDialog):
             self._project_page_names(),
             start=start,
             end=end,
+            current_page=self.current_page,
             parent=section,
         )
         self.range_start = self.page_range_progress.range_start
@@ -1480,6 +1483,8 @@ class RunPipelineDialog(QDialog):
         return list(pages) if pages is not None else []
 
     def selected_pages(self):
+        if hasattr(self, 'page_range_progress'):
+            return self.page_range_progress.get_selected_pages()
         pages = self._project_page_names()
         if not pages:
             return []

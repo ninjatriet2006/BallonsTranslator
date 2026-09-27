@@ -56,6 +56,7 @@ from .font_change_detection import FontChangeDetector
 from .font_refresh import FontRefreshController
 from .update_dialog import UpdateReleaseDialog
 from .run_pipeline_dialog import RunPipelineDialog
+from .pipeline_error_dialog import PipelineErrorDialog
 from .custom_widget import ScrollBar, Widget, ViewWidget
 from .global_search_widget import GlobalSearchWidget
 from .llm_context_editor import LLMContextEditor
@@ -515,6 +516,8 @@ class MainWindow(mainwindow_cls):
         self.bottomBar.ocr_selector.llm_profile_changed.connect(self.on_ocr_llm_profile_changed)
         self.drawingPanel.inpainter_changed.connect(module_manager.selectInpainter)
         self.drawingPanel.inpainter_config_requested.connect(self.to_inpaint_config)
+        self.module_manager.pipeline_issues_updated.connect(self.bottomBar.update_error_count)
+        self.bottomBar.error_badge.clicked.connect(self.show_pipeline_error_dialog)
         for idx, action in enumerate(self.titleBar.moduleVisibilityActions):
             self._set_module_tool_visibility(idx, action.isChecked())
 
@@ -2302,10 +2305,13 @@ class MainWindow(mainwindow_cls):
             self.set_display_lang(lang)
     
     def run_imgtrans(self):
+        current_idx = self.pageList.currentIndex().row() if hasattr(self, 'pageList') else -1
+        current_page = current_idx + 1 if current_idx >= 0 else 1
         dialog = RunPipelineDialog(
             self,
             project=self.imgtrans_proj,
             translator_metadata=self.module_manager.translator_metadata(),
+            current_page=current_page,
         )
         dialog.translate_source_changed.connect(self.on_trans_src_changed)
         dialog.translate_target_changed.connect(self.on_trans_tgt_changed)
@@ -2332,6 +2338,24 @@ class MainWindow(mainwindow_cls):
             self.on_run_imgtrans(pages_to_process=dialog.selected_pages())
         finally:
             dialog.deleteLater()
+
+    def show_pipeline_error_dialog(self):
+        issues = self.module_manager.pipeline_issues
+        if not issues:
+            return
+        dialog = PipelineErrorDialog(
+            issues=issues,
+            parent=self,
+            on_retry=self.retry_pipeline_pages,
+        )
+        dialog.cleared.connect(self.module_manager.clear_pipeline_issues)
+        dialog.retry_requested.connect(self.retry_pipeline_pages)
+        dialog.exec_()
+
+    def retry_pipeline_pages(self, pages: List[str]):
+        if not pages:
+            return
+        self.on_run_imgtrans(pages_to_process=pages)
 
     def on_run_imgtrans(
         self,

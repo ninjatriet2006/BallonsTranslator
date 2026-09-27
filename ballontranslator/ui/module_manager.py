@@ -47,6 +47,7 @@ from ballontranslator.utils.proj_imgtrans import ProjImgTrans
 from ballontranslator.utils.config import pcfg, RunStatus, save_config, LLMTranslateContext
 from ballontranslator.utils.llm_profiles import LLM_DETECTOR_KEY, LLM_INPAINT_KEY, LLM_OCR_KEY
 from ballontranslator.utils.global_callbacks import register_global_callback
+from ballontranslator.utils.stage_auditor import StageAuditor, StageIssue, is_safety_refusal_error
 cfg_module = pcfg.module
 
 # RUN can report the same missing LLM key from multiple page workers.
@@ -675,6 +676,9 @@ class TranslateThread(ModuleThread):
         self.start()
 
     def _handle_translate_error(self, e: Exception, page_key: str):
+        if pcfg.module.pipeline_fault_tolerant:
+            LOGGER.warning(f"Translation failed for {page_key}: {e}")
+            return
         msg = '{}\n{}: {}'.format(
             self.tr('Translation Failed.'),
             self.tr('Page'),
@@ -834,6 +838,7 @@ class ImgtransThread(QThread):
         self.stop_event = threading.Event()
         self._pipeline_stop_emitted = False
         self.pages_to_process = None
+        self.runtime_issues: List[StageIssue] = []
         register_global_callback('user_request_stop', self.isStopRequested)
 
     def on_module_thread_stopped(self):
@@ -877,10 +882,15 @@ class ImgtransThread(QThread):
     ):
         self.imgtrans_proj = imgtrans_proj
         self.pages_to_process = pages_to_process  # 保存需要处理的页面列表
+        self.runtime_issues = []
         self.num_pages = len(self.imgtrans_proj.pages)
         self.clearStopRequest()
         # 创建处理索引到实际页面索引的映射
         self.process_idx_to_page_idx = {}
+        self.detect_counter = 0
+        self.ocr_counter = 0
+        self.translate_counter = 0
+        self.inpaint_counter = 0
         self.job = self._imgtrans_pipeline
         self.start()
     
@@ -1212,13 +1222,36 @@ class ImgtransThread(QThread):
                     self.requestStop()
                     break
                 except ModuleRunError as e:
-                    self._stop_on_stage_failure(
-                        e,
-                        self.tr('Text Detection Failed.'),
-                        'TextDetectFailed',
-                        imgname,
-                    )
-                    break
+                    if pcfg.module.pipeline_fault_tolerant:
+                        LOGGER.warning(f"[Detector][{page_num}] Text detection failed for {imgname}: {e}")
+                        err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+                        self.runtime_issues.append(StageIssue(
+                            page_key=imgname,
+                            stage='detect',
+                            error_type=err_type,
+                            message=str(e),
+                            page_index=page_idx if page_idx is not None else -1,
+                        ))
+                        self.detect_counter += 1
+                        self.update_detect_progress.emit(self.detect_counter)
+                        if cfg_module.enable_ocr:
+                            self.ocr_counter += 1
+                            self.update_ocr_progress.emit(self.ocr_counter)
+                        if cfg_module.enable_translate and not self.parallel_trans:
+                            self.translate_counter += 1
+                            self.update_translate_progress.emit(self.translate_counter)
+                        if cfg_module.enable_inpaint:
+                            self.inpaint_counter += 1
+                            self.update_inpaint_progress.emit(self.inpaint_counter)
+                        continue
+                    else:
+                        self._stop_on_stage_failure(
+                            e,
+                            self.tr('Text Detection Failed.'),
+                            'TextDetectFailed',
+                            imgname,
+                        )
+                        break
                 self.detect_counter += 1
                 if pcfg.module.keep_exist_textlines:
                     blk_list = self.imgtrans_proj.pages[imgname] + blk_list
@@ -1317,13 +1350,26 @@ class ImgtransThread(QThread):
                     self.requestStop()
                     break
                 except ModuleRunError as e:
-                    self._stop_on_stage_failure(
-                        e,
-                        self.tr('OCR Failed.'),
-                        'OCRFailed',
-                        imgname,
-                    )
-                    break
+                    if pcfg.module.pipeline_fault_tolerant:
+                        LOGGER.warning(f"[OCR][{page_num}] OCR failed for {imgname}: {e}")
+                        err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+                        self.runtime_issues.append(StageIssue(
+                            page_key=imgname,
+                            stage='ocr',
+                            error_type=err_type,
+                            message=str(e),
+                            page_index=page_idx if page_idx is not None else -1,
+                        ))
+                        self.ocr_counter += 1
+                        self.update_ocr_progress.emit(self.ocr_counter)
+                    else:
+                        self._stop_on_stage_failure(
+                            e,
+                            self.tr('OCR Failed.'),
+                            'OCRFailed',
+                            imgname,
+                        )
+                        break
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_OCR)
                 self.update_ocr_progress.emit(self.ocr_counter)
                 page_idx = self.imgtrans_proj.pagename2idx(imgname)
@@ -1338,11 +1384,25 @@ class ImgtransThread(QThread):
                 if self.parallel_trans:
                     self.translate_thread.push_pagekey_queue(imgname)
                 elif not low_vram_trans:
-                    self._translate_full_page(
-                        self.imgtrans_proj,
-                        imgname,
-                        blk_list,
-                    )
+                    try:
+                        self._translate_full_page(
+                            self.imgtrans_proj,
+                            imgname,
+                            blk_list,
+                        )
+                    except Exception as e:
+                        if pcfg.module.pipeline_fault_tolerant:
+                            LOGGER.warning(f"[Translator][{page_num}] Translation failed for {imgname}: {e}")
+                            err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+                            self.runtime_issues.append(StageIssue(
+                                page_key=imgname,
+                                stage='translate',
+                                error_type=err_type,
+                                message=str(e),
+                                page_index=page_idx if page_idx is not None else -1,
+                            ))
+                        else:
+                            raise e
                     self.translate_counter += 1
                     self.update_translate_progress.emit(self.translate_counter)
 
@@ -1376,13 +1436,24 @@ class ImgtransThread(QThread):
                         self.requestStop()
                         break
                     except Exception as e:
-                        _create_page_error_dialog(
-                            e,
-                            self.tr('Inpainting Failed.'),
-                            'InpaintFailed',
-                            imgname,
-                            self.tr('Page'),
-                        )
+                        if pcfg.module.pipeline_fault_tolerant:
+                            LOGGER.warning(f"[Inpainter][{page_num}] Inpainting failed for {imgname}: {e}")
+                            err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+                            self.runtime_issues.append(StageIssue(
+                                page_key=imgname,
+                                stage='inpaint',
+                                error_type=err_type,
+                                message=str(e),
+                                page_index=page_idx if page_idx is not None else -1,
+                            ))
+                        else:
+                            _create_page_error_dialog(
+                                e,
+                                self.tr('Inpainting Failed.'),
+                                'InpaintFailed',
+                                imgname,
+                                self.tr('Page'),
+                            )
                     
                 self.inpaint_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
@@ -1402,11 +1473,25 @@ class ImgtransThread(QThread):
                     break
                     
                 blk_list = self.imgtrans_proj.pages[imgname]
-                self._translate_full_page(
-                    self.imgtrans_proj,
-                    imgname,
-                    blk_list,
-                )
+                try:
+                    self._translate_full_page(
+                        self.imgtrans_proj,
+                        imgname,
+                        blk_list,
+                    )
+                except Exception as e:
+                    if pcfg.module.pipeline_fault_tolerant:
+                        LOGGER.warning(f"[Translator][{page_num}] Translation failed for {imgname}: {e}")
+                        err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+                        self.runtime_issues.append(StageIssue(
+                            page_key=imgname,
+                            stage='translate',
+                            error_type=err_type,
+                            message=str(e),
+                            page_index=page_idx if page_idx is not None else -1,
+                        ))
+                    else:
+                        raise e
                 self.translate_counter += 1
                 self.update_translate_progress.emit(self.translate_counter)
 
@@ -1500,6 +1585,7 @@ class ModuleManager(QObject):
     page_trans_finished = Signal(int)
     page_stage_finished = Signal(str, int)
     module_selection_changed = Signal(str, str)
+    pipeline_issues_updated = Signal(int)
 
     run_canvas_inpaint = False
     is_waiting_th = False
@@ -1510,8 +1596,17 @@ class ModuleManager(QObject):
                  *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.imgtrans_proj = imgtrans_proj
+        self._pipeline_issues: List[StageIssue] = []
         self._pending_canvas_inpaint: Optional[dict] = None
         self._canvas_inpaint_source: Optional[np.ndarray] = None
+
+    @property
+    def pipeline_issues(self) -> List[StageIssue]:
+        return list(self._pipeline_issues)
+
+    def clear_pipeline_issues(self):
+        self._pipeline_issues.clear()
+        self.pipeline_issues_updated.emit(0)
         self.check_inpaint_fin_timer = QTimer(self)
         self.check_inpaint_fin_timer.timeout.connect(self.check_inpaint_th_finished)
         self.prepare_msgbox: ProgressMessageBox = None
@@ -1571,6 +1666,7 @@ class ModuleManager(QObject):
         self.imgtrans_thread.finish_blktrans_stage.connect(self.on_finish_blktrans_stage)
         self.imgtrans_thread.finish_blktrans.connect(self.on_finish_blktrans)
         self.imgtrans_thread.pipeline_stopped.connect(self.on_imgtrans_thread_stopped)
+        self.imgtrans_thread.finished.connect(self.on_imgtrans_thread_finished)
 
         merge_config_module_params(
             cfg_module.translator_params, GET_VALID_TRANSLATORS(), TRANSLATORS.get)
@@ -2351,8 +2447,8 @@ class ModuleManager(QObject):
             return True
         return False
 
-    def finishImgtransPipeline(self):
-        if self.proj_finished():
+    def finishImgtransPipeline(self, force: bool = False):
+        if force or self.proj_finished():
             self.progress_msgbox.hide()
             start_time = getattr(self.imgtrans_thread, 'pipeline_start_time', None)
             elapsed_str = f" in {time.time() - start_time:.1f}s" if start_time else ""
@@ -2367,13 +2463,41 @@ class ModuleManager(QObject):
                 stats.append(f"Inpaint: {self.imgtrans_thread.inpaint_counter}")
             stats_str = f" | Stats: {', '.join(stats)}" if stats else ""
             LOGGER.stop(f"Translation pipeline completed: {self.imgtrans_thread.num_pages} page(s){elapsed_str}{stats_str}")
+            self._audit_and_update_issues()
             self.imgtrans_pipeline_finished.emit()
     
+    def on_imgtrans_thread_finished(self):
+        """Ensure cleanup and issue audit when the pipeline thread finishes."""
+        self.finishImgtransPipeline(force=True)
+
     def on_imgtrans_thread_stopped(self):
         """线程完成时确保关闭进度对话框"""
-        # 线程完成了，直接关闭窗口
         self.progress_msgbox.hide()
+        self._audit_and_update_issues()
         self.imgtrans_pipeline_finished.emit()
+
+    def _audit_and_update_issues(self):
+        enabled_stages = {
+            'detect': cfg_module.enable_detect,
+            'ocr': cfg_module.enable_ocr,
+            'translate': cfg_module.enable_translate,
+            'inpaint': cfg_module.enable_inpaint,
+        }
+        target_pages = getattr(self.imgtrans_thread, 'pages_to_process', None)
+        audited = StageAuditor.audit_project_pages(
+            self.imgtrans_proj,
+            target_pages=target_pages,
+            enabled_stages=enabled_stages,
+        )
+        runtime = getattr(self.imgtrans_thread, 'runtime_issues', [])
+        all_issues = list(runtime)
+        seen = {(issue.page_key, issue.stage) for issue in all_issues}
+        for ai in audited:
+            if (ai.page_key, ai.stage) not in seen:
+                all_issues.append(ai)
+                seen.add((ai.page_key, ai.stage))
+        self._pipeline_issues = all_issues
+        self.pipeline_issues_updated.emit(len(self._pipeline_issues))
 
     def _select_module(self, module_key: str, module_name: str, valid_modules: List[str]):
         if module_name is None:

@@ -133,6 +133,12 @@ class ModuleConfig(Config):
     empty_runcache: bool = False
     finish_code: int = 15
 
+    enable_verify: bool = False
+    verifier_llm_id: str = ''
+    verify_detail: str = 'auto'
+    verify_thinking: str = 'auto'
+    pipeline_fault_tolerant: bool = True
+
     def get_params(self, module_key: str, for_saving=False) -> dict:
         d = self[module_key + '_params']
         if not for_saving:

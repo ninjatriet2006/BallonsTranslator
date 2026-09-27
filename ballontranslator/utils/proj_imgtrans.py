@@ -712,6 +712,16 @@ class ProjImgTrans:
                 self.set_current_img_byidx(0)
         self._load_identity = object()
 
+    def get_img_info(self, pagename: str) -> dict:
+        with self._lock:
+            info = self._image_info.get(pagename)
+            return dict(info) if isinstance(info, dict) else {}
+
+    def get_page_finish_code(self, pagename: str) -> int:
+        with self._lock:
+            info = self._image_info.get(pagename)
+            return info.get('finish_code', 0) if isinstance(info, dict) else 0
+
     def get_page_progress(self, pagename: str):
         with self._lock:
             fin_code = self._image_info[pagename]['finish_code']

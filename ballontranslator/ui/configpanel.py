@@ -790,6 +790,29 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         self.package_auto_install_checker.stateChanged.connect(self.on_package_auto_install_changed)
         pipeline_options_layout.addWidget(self.package_auto_install_checker)
 
+        self.fault_tolerant_checker = QCheckBox(
+            self.tr('Fault-tolerant pipeline (skip failed pages and continue)')
+        )
+        self.fault_tolerant_checker.setObjectName('PipelineModuleActionCheckBox')
+        self.fault_tolerant_checker.setToolTip(
+            self.tr(
+                'When enabled, pipeline does not abort on page failures; '
+                'issues can be reviewed and retried from the bottom bar.'
+            )
+        )
+        self.fault_tolerant_checker.stateChanged.connect(self.on_fault_tolerant_changed)
+        pipeline_options_layout.addWidget(self.fault_tolerant_checker)
+
+        self.enable_verify_checker = QCheckBox(
+            self.tr('Enable translation stage verification (verify mode)')
+        )
+        self.enable_verify_checker.setObjectName('PipelineModuleActionCheckBox')
+        self.enable_verify_checker.setToolTip(
+            self.tr('Audit translated text blocks to verify translation quality and completion.')
+        )
+        self.enable_verify_checker.stateChanged.connect(self.on_enable_verify_changed)
+        pipeline_options_layout.addWidget(self.enable_verify_checker)
+
         CONFIG_SPINBOX_COMPACT = 80
 
         # LLM Concurrency & Rate Limit Grid (2x2)
@@ -1570,6 +1593,14 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
     def on_package_auto_install_changed(self):
         pcfg.package_manager.auto_install_missing_packages = self.package_auto_install_checker.isChecked()
 
+    def on_fault_tolerant_changed(self):
+        pcfg.module.pipeline_fault_tolerant = self.fault_tolerant_checker.isChecked()
+        self.save_config.emit()
+
+    def on_enable_verify_changed(self):
+        pcfg.module.enable_verify = self.enable_verify_checker.isChecked()
+        self.save_config.emit()
+
     def on_llm_translate_threads_changed(self, val: int):
         pcfg.module.llm_translate_threads = val
         pcfg.module.llm_threads = val
@@ -2079,6 +2110,8 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         self.rst_imgquality_edit.setText(str(pcfg.imgsave_quality))
         self.empty_runcache_checker.setChecked(pcfg.module.empty_runcache)
         self.package_auto_install_checker.setChecked(pcfg.package_manager.auto_install_missing_packages)
+        self.fault_tolerant_checker.setChecked(getattr(pcfg.module, 'pipeline_fault_tolerant', True))
+        self.enable_verify_checker.setChecked(getattr(pcfg.module, 'enable_verify', False))
         self.llm_translate_threads_spin.setValue(getattr(pcfg.module, 'llm_translate_threads', getattr(pcfg.module, 'llm_threads', 4)))
         self.llm_ocr_threads_spin.setValue(getattr(pcfg.module, 'llm_ocr_threads', 2))
         self.llm_inpaint_threads_spin.setValue(getattr(pcfg.module, 'llm_inpaint_threads', 2))
