@@ -443,6 +443,56 @@ class LLMOCR(LLMChatRequester, OCRBase):
         }
         return normalized_texts, order
 
+    def _ocr_blocks(
+        self,
+        img: np.ndarray,
+        blk_list: List[TextBlock],
+    ) -> None:
+        """Recognize blocks concurrently using configured llm_ocr_threads."""
+        profile = self.profile
+        profile_concurrency = getattr(profile, 'concurrency', 0) if profile else 0
+        if profile_concurrency > 0:
+            workers = profile_concurrency
+        else:
+            workers = getattr(pcfg.module, 'llm_ocr_threads', 2)
+        workers = max(1, min(16, int(workers)))
+
+        crops_and_blks = []
+        im_h, im_w = img.shape[:2]
+        for blk in blk_list:
+            x1, y1, x2, y2 = blk.xyxy
+            y1c, y2c = max(0, y1), min(im_h, y2)
+            x1c, x2c = max(0, x1), min(im_w, x2)
+            if y1c < y2c and x1c < x2c:
+                crops_and_blks.append((img[y1c:y2c, x1c:x2c], blk))
+
+        if not crops_and_blks:
+            return
+
+        if workers <= 1 or len(crops_and_blks) <= 1:
+            for crop, blk in crops_and_blks:
+                if self.stop_event is not None and self.stop_event.is_set():
+                    raise LLMRequestStopped()
+                blk.text = self.ocr_img(crop)
+            return
+
+        import concurrent.futures
+
+        def ocr_worker(item):
+            crop, blk = item
+            if self.stop_event is not None and self.stop_event.is_set():
+                raise LLMRequestStopped()
+            text = self.ocr_img(crop)
+            return blk, text
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(workers, len(crops_and_blks))) as executor:
+            futures = [executor.submit(ocr_worker, item) for item in crops_and_blks]
+            for future in concurrent.futures.as_completed(futures):
+                if self.stop_event is not None and self.stop_event.is_set():
+                    raise LLMRequestStopped()
+                blk, text = future.result()
+                blk.text = text
+
     def _ocr_blk_list(
         self,
         img: np.ndarray,
@@ -452,7 +502,8 @@ class LLMOCR(LLMChatRequester, OCRBase):
         **kwargs,
     ) -> Optional[List[TextBlock]]:
         if not pcfg.module.ocr_llm_page_level or not full_page or not blk_list:
-            return super()._ocr_blk_list(img, blk_list, *args, **kwargs)
+            self._ocr_blocks(img, blk_list)
+            return None
 
         self.logger.info(f"Performing Page-level LLM OCR on {len(blk_list)} blocks...")
         mask_non_text = pcfg.module.ocr_llm_mask_non_text
@@ -513,4 +564,5 @@ class LLMOCR(LLMChatRequester, OCRBase):
                 )
             self.logger.debug(details)
             self.logger.debug(traceback.format_exc())
-            return super()._ocr_blk_list(img, blk_list, *args, **kwargs)
+            self._ocr_blocks(img, blk_list)
+            return None

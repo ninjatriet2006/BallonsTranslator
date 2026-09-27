@@ -364,6 +364,24 @@ def layout_lines_alignside(
 
 
 
+def balance_lines(lines: List[Line], delimiter: str = ' ') -> List[Line]:
+    """Balance orphan words on the last line for non-CJK text to prevent ragged balloons."""
+    if len(lines) < 2 or not delimiter:
+        return lines
+    last_line = lines[-1]
+    prev_line = lines[-2]
+    last_words = [w for w in last_line.text.strip().split(delimiter) if w]
+    prev_words = [w for w in prev_line.text.strip().split(delimiter) if w]
+    if len(last_words) == 1 and len(prev_words) >= 3:
+        moved_word = prev_words.pop()
+        last_words.insert(0, moved_word)
+        prev_line.text = delimiter.join(prev_words)
+        prev_line.num_words = len(prev_words)
+        last_line.text = delimiter.join(last_words)
+        last_line.num_words = len(last_words)
+    return lines
+
+
 def layout_text(
     blk: TextBlock,
     mask: np.ndarray, 
@@ -451,6 +469,9 @@ def layout_text(
         lines, adjust_xy = layout_lines_alignside(blk, mask, words, centroid, wl_list, delimiter_len, line_height, spacing, delimiter, False, max_central_width, 
                                        ref_src_lines=ref_src_lines, srcline_wlist=srcline_wlist)
     
+    if not tgt_is_cjk and delimiter == ' ':
+        lines = balance_lines(lines, delimiter)
+
     concated_text = []
     pos_x_lst, pos_right_lst = [], []
     for line in lines:

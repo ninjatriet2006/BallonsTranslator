@@ -1009,6 +1009,15 @@ class SceneTextManager(QObject):
             w = xywh[2]
             post_resize_ratio = np.clip(max(region_rect[2] / w, downscale_constraint), 0, 1)
             resize_ratio *= post_resize_ratio
+        elif region_rect is not None and len(region_rect) >= 4 and region_rect[2] > 0 and region_rect[3] > 0:
+            w, h = xywh[2], xywh[3]
+            if w > region_rect[2] * 0.95 or h > region_rect[3] * 0.95:
+                scale_w = (region_rect[2] * 0.92) / max(w, 1)
+                scale_h = (region_rect[3] * 0.92) / max(h, 1)
+                fit_ratio = float(np.clip(min(scale_w, scale_h), 0.5, 1.0))
+                if fit_ratio < 1.0:
+                    post_resize_ratio = fit_ratio
+                    resize_ratio *= post_resize_ratio
 
         if post_resize_ratio != 1:
             cx, cy = xywh[0] + xywh[2] / 2, xywh[1] + xywh[3] / 2

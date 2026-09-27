@@ -1,12 +1,13 @@
 """Qt-free glossary loading, selection, and deterministic rendering."""
 
+from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
 import json
 import os
 from pathlib import Path
 import stat
-from typing import Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 
 GLOSSARY_MODE_MATCHING = "matching"
@@ -97,6 +98,63 @@ def load_glossary(path: Optional[PathValue]) -> Tuple[GlossaryEntry, ...]:
     )
 
 
+class _ACNode:
+    __slots__ = ('children', 'fail', 'outputs')
+
+    def __init__(self) -> None:
+        self.children: dict[str, _ACNode] = {}
+        self.fail: Optional[_ACNode] = None
+        self.outputs: list[int] = []
+
+
+class _FastGlossaryMatcher:
+    """Aho-Corasick multi-pattern substring search for fast glossary selection."""
+
+    def __init__(self, terms: Sequence[str]) -> None:
+        self.root = _ACNode()
+        for idx, term in enumerate(terms):
+            if not term:
+                continue
+            node = self.root
+            for ch in term:
+                node = node.children.setdefault(ch, _ACNode())
+            node.outputs.append(idx)
+
+        queue: deque[_ACNode] = deque()
+        for child in self.root.children.values():
+            child.fail = self.root
+            queue.append(child)
+
+        while queue:
+            curr = queue.popleft()
+            for ch, child in curr.children.items():
+                fail = curr.fail
+                while fail is not None and ch not in fail.children:
+                    fail = fail.fail
+                child.fail = fail.children[ch] if fail is not None else self.root
+                if child.fail.outputs:
+                    child.outputs = child.outputs + child.fail.outputs
+                queue.append(child)
+
+    def match(self, text: str) -> Set[int]:
+        matched: set[int] = set()
+        curr: Optional[_ACNode] = self.root
+        for ch in text:
+            while curr is not None and ch not in curr.children:
+                curr = curr.fail
+            curr = curr.children[ch] if curr is not None else self.root
+            if curr.outputs:
+                matched.update(curr.outputs)
+        return matched
+
+
+@lru_cache(maxsize=16)
+def _build_glossary_matcher(
+    entries: Tuple[GlossaryEntry, ...]
+) -> _FastGlossaryMatcher:
+    return _FastGlossaryMatcher([e.source.casefold() for e in entries])
+
+
 def select_glossary(
     entries: Iterable[GlossaryEntry],
     sources: Iterable[str],
@@ -121,6 +179,8 @@ def select_glossary(
                 mode
             )
         )
+    if not ordered_entries:
+        return ()
 
     if isinstance(sources, str):
         joined_sources = sources
@@ -129,11 +189,19 @@ def select_glossary(
             str(source) for source in sources if source is not None
         )
     folded_sources = joined_sources.casefold()
-    return tuple(
-        entry
-        for entry in ordered_entries
-        if entry.source.casefold() in folded_sources
-    )
+    if not folded_sources:
+        return ()
+
+    if len(ordered_entries) <= 10:
+        return tuple(
+            entry
+            for entry in ordered_entries
+            if entry.source.casefold() in folded_sources
+        )
+
+    matcher = _build_glossary_matcher(ordered_entries)
+    matched_indices = matcher.match(folded_sources)
+    return tuple(ordered_entries[idx] for idx in sorted(matched_indices))
 
 
 def render_glossary(entries: Sequence[GlossaryEntry]) -> str:

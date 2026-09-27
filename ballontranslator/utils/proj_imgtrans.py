@@ -1025,16 +1025,22 @@ class ProjImgTrans:
                 raise ProjectDirNotExistException
             tmp_save_tgt = self.proj_path + '.tmp'
             try:
+                payload = json.dumps(self.to_dict(), ensure_ascii=False, cls=TextBlkEncoder)
                 with open(tmp_save_tgt, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(self.to_dict(), ensure_ascii=False, cls=TextBlkEncoder))
-            except:
-                raise Exception(f'Failed to write {self.to_dict()}')
+                    f.write(payload)
+            except Exception as e:
+                if osp.exists(tmp_save_tgt):
+                    try:
+                        os.remove(tmp_save_tgt)
+                    except OSError:
+                        pass
+                raise Exception(f'Failed to write project JSON: {e}') from e
             if osp.exists(self.proj_path) and keep_exist_as_backup:
                 os.replace(self.proj_path, self.proj_path + '.backup')
                 os.replace(tmp_save_tgt, self.proj_path)
             else:
                 os.replace(tmp_save_tgt, self.proj_path)
-            LOGGER.debug(f'project saved')
+            LOGGER.debug('project saved')
 
     def to_dict(self) -> Dict:
         with self._lock:

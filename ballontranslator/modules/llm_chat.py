@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import email.utils
+import random
 import re
 import threading
 import time
@@ -24,6 +26,30 @@ from ballontranslator.utils.llm_profiles import (
     resolve_api_key,
 )
 from ballontranslator.utils.config import pcfg
+
+TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
+def _parse_retry_after(response: Any, default: float) -> float:
+    """Parse HTTP Retry-After header as seconds or date, capped at 120s."""
+    if response is None:
+        return default
+    headers = getattr(response, 'headers', None)
+    if not headers:
+        return default
+    retry_header = headers.get('retry-after') or headers.get('Retry-After')
+    if not retry_header:
+        return default
+    try:
+        val = float(retry_header)
+        return max(0.5, min(val, 120.0))
+    except (ValueError, TypeError):
+        try:
+            target_time = email.utils.parsedate_to_datetime(retry_header).timestamp()
+            diff = target_time - time.time()
+            return max(0.5, min(diff, 120.0))
+        except Exception:
+            return default
 
 
 OPENAI_MAX_TOKENS_MODELS = frozenset({
@@ -215,20 +241,25 @@ class LLMChatRequester:
     def _http_client(self, proxy: str) -> Any:
         import httpx  # type: ignore
 
+        limits = httpx.Limits(
+            max_keepalive_connections=20,
+            max_connections=50,
+            keepalive_expiry=30.0,
+        )
         if not proxy:
-            return httpx.Client()
+            return httpx.Client(limits=limits)
         try:
             mounts = {
-                'http://': httpx.HTTPTransport(proxy=proxy),
-                'https://': httpx.HTTPTransport(proxy=proxy),
+                'http://': httpx.HTTPTransport(proxy=proxy, limits=limits),
+                'https://': httpx.HTTPTransport(proxy=proxy, limits=limits),
             }
-            return httpx.Client(mounts=mounts)
+            return httpx.Client(mounts=mounts, limits=limits)
         except Exception as error:
             self.logger.error(
                 f"Failed to initialize proxy '{proxy}': {error}. "
                 'Proceeding without proxy.'
             )
-            return httpx.Client()
+            return httpx.Client(limits=limits)
 
     @staticmethod
     def _api_key_for_profile(profile: LLMProfile) -> str:
@@ -323,9 +354,6 @@ class LLMChatRequester:
             raise LLMRequestStopped()
         openai = self._openai_module()
         client = self._initialize_client(profile)
-        self._respect_delay(profile)
-        if self.stop_event is not None and self.stop_event.is_set():
-            raise LLMRequestStopped()
         call_args = dict(api_args)
         if 'timeout' not in call_args:
             configured_timeout = None
@@ -337,14 +365,57 @@ class LLMChatRequester:
                 except Exception:
                     pass
             call_args['timeout'] = configured_timeout if (configured_timeout and configured_timeout > 0) else 180.0
-        try:
-            completion = client.chat.completions.create(**call_args)
-        except getattr(openai, 'AuthenticationError') as error:
-            raise LLMApiKeyRequiredError(
-                profile.id, profile.name
-            ) from error
-        except getattr(openai, 'APIStatusError') as error:
-            raise LLMChatRequestError(error) from error
+
+        max_transient_retries = 3
+        base_backoff = 2.0
+        completion = None
+
+        for attempt in range(max_transient_retries + 1):
+            if self.stop_event is not None and self.stop_event.is_set():
+                raise LLMRequestStopped()
+            self._respect_delay(profile)
+            if self.stop_event is not None and self.stop_event.is_set():
+                raise LLMRequestStopped()
+
+            try:
+                completion = client.chat.completions.create(**call_args)
+                break
+            except getattr(openai, 'AuthenticationError') as error:
+                raise LLMApiKeyRequiredError(
+                    profile.id, profile.name
+                ) from error
+            except Exception as error:
+                status_error_type = getattr(openai, 'APIStatusError', ())
+                connection_error_type = getattr(openai, 'APIConnectionError', ())
+                timeout_error_type = getattr(openai, 'APITimeoutError', ())
+
+                is_status_error = isinstance(error, status_error_type)
+                status_code = getattr(error, 'status_code', None) if is_status_error else None
+                is_connection_error = isinstance(error, connection_error_type)
+                is_timeout_error = isinstance(error, timeout_error_type)
+
+                is_transient = (
+                    (is_status_error and status_code in TRANSIENT_STATUS_CODES)
+                    or is_connection_error
+                    or is_timeout_error
+                )
+
+                if is_transient and attempt < max_transient_retries:
+                    response = getattr(error, 'response', None)
+                    jitter = random.uniform(0.2, 1.0)
+                    default_wait = min(60.0, (base_backoff ** attempt) * 2.0 + jitter)
+                    wait_time = _parse_retry_after(response, default_wait)
+                    status_desc = f"HTTP {status_code}" if status_code else type(error).__name__
+                    self.logger.warning(
+                        f"Transient error ({status_desc}) from LLM provider. "
+                        f"Retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_transient_retries})..."
+                    )
+                    self._wait(wait_time)
+                    continue
+
+                if is_status_error:
+                    raise LLMChatRequestError(error) from error
+                raise
 
         if self.stop_event is not None and self.stop_event.is_set():
             raise LLMRequestStopped()
