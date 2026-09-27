@@ -121,8 +121,11 @@ class ModuleConfig(Config):
     llm_threads: int = 4
     llm_translate_threads: int = 4
     llm_ocr_threads: int = 2
+    llm_inpaint_threads: int = 2
     llm_request_delay: float = 0.0
     local_detect_threads: int = 1
+    local_ocr_threads: int = 1
+    local_translate_threads: int = 1
     local_inpaint_threads: int = 1
 
     check_need_inpaint: bool = True
@@ -255,6 +258,11 @@ class ModuleConfig(Config):
             self.llm_ocr_threads = 2
 
         try:
+            self.llm_inpaint_threads = max(1, min(16, int(getattr(self, 'llm_inpaint_threads', 2))))
+        except Exception:
+            self.llm_inpaint_threads = 2
+
+        try:
             self.llm_request_delay = max(0.0, min(60.0, float(getattr(self, 'llm_request_delay', 0.0))))
         except Exception:
             self.llm_request_delay = 0.0
@@ -263,6 +271,16 @@ class ModuleConfig(Config):
             self.local_detect_threads = max(1, min(4, int(getattr(self, 'local_detect_threads', getattr(self, 'local_threads', 1)))))
         except Exception:
             self.local_detect_threads = 1
+
+        try:
+            self.local_ocr_threads = max(1, min(4, int(getattr(self, 'local_ocr_threads', 1))))
+        except Exception:
+            self.local_ocr_threads = 1
+
+        try:
+            self.local_translate_threads = max(1, min(4, int(getattr(self, 'local_translate_threads', 1))))
+        except Exception:
+            self.local_translate_threads = 1
 
         try:
             self.local_inpaint_threads = max(1, min(4, int(getattr(self, 'local_inpaint_threads', getattr(self, 'local_threads', 1)))))

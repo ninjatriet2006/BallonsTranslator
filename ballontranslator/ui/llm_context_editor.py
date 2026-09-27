@@ -8,9 +8,13 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QToolButton,
-    QWIDGETSIZE_MAX,
     QWidget,
 )
+
+try:
+    from qtpy.QtWidgets import QWIDGETSIZE_MAX
+except ImportError:
+    QWIDGETSIZE_MAX = 16777215
 
 try:
     from qtpy.QtWidgets import QUndoCommand

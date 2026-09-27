@@ -620,11 +620,13 @@ QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow:hover {
 }
 
 QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow QLabel#LLMProfileFieldLabel,
+QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow QToolButton#LLMProfileModelFetchButton,
 QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow QToolButton#LLMProfileModelAddButton,
 QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow QToolButton#LLMProfileModelRemoveButton {
     background-color: transparent;
 }
 
+QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow QToolButton#LLMProfileModelFetchButton:hover,
 QGroupBox#LLMProfileCard QWidget#LLMProfileModalityRow QToolButton#LLMProfileModelAddButton:hover {
     background-color: rgb(30, 147, 229);
 }
@@ -1331,6 +1333,7 @@ QToolButton#LLMProfileConfigButton {
     background-color: @widgetBackgroundColor;
 }
 
+QToolButton#LLMProfileModelFetchButton,
 QToolButton#LLMProfileModelAddButton,
 QToolButton#LLMProfileModelRemoveButton {
     width: 12px;
@@ -1341,6 +1344,7 @@ QToolButton#LLMProfileModelRemoveButton {
     background-color: @widgetBackgroundColor;
 }
 
+QToolButton#LLMProfileModelFetchButton:hover,
 QToolButton#LLMProfileModelAddButton:hover {
     background-color: rgb(30, 147, 229);
 }

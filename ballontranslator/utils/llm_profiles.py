@@ -764,3 +764,173 @@ def migrate_module_llm_profiles(module_cfg: Dict, secret_store: SecretStore = No
 
     module_cfg["llm_profiles"] = profiles
     return module_cfg
+
+
+def get_candidate_model_endpoints(base_url: str, api_key: str = "") -> List[str]:
+    """Return prioritized candidate URLs to query available models."""
+    url = str(base_url or "").strip().rstrip("/")
+    if url.endswith("/chat/completions"):
+        url = url[:-len("/chat/completions")].rstrip("/")
+    if url.endswith("/images/edits"):
+        url = url[:-len("/images/edits")].rstrip("/")
+    if url.endswith("/images"):
+        url = url[:-len("/images")].rstrip("/")
+
+    candidates: List[str] = []
+    if not url:
+        return candidates
+
+    if url.endswith("/models"):
+        return [url]
+
+    candidates.append(f"{url}/models")
+
+    if not url.endswith(("/v1", "/v1beta")) and "/v1/" not in url and "/v1beta/" not in url:
+        candidates.append(f"{url}/v1/models")
+
+    if "generativelanguage.googleapis.com" in url:
+        if api_key:
+            candidates.append(f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}")
+        else:
+            candidates.append("https://generativelanguage.googleapis.com/v1beta/models")
+
+    if "11434" in url or "ollama" in url.lower():
+        ollama_root = url.split("/v1")[0].rstrip("/")
+        candidates.append(f"{ollama_root}/api/tags")
+
+    seen = set()
+    deduped = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            deduped.append(c)
+    return deduped
+
+
+def _extract_model_ids(data: Any) -> List[str]:
+    """Extract and normalize model names from provider JSON responses."""
+    models: List[str] = []
+    if isinstance(data, dict):
+        raw_list = data.get("data") or data.get("models") or []
+        if isinstance(raw_list, list):
+            for item in raw_list:
+                if isinstance(item, dict):
+                    if "supportedGenerationMethods" in item:
+                        methods = item.get("supportedGenerationMethods") or []
+                        if "generateContent" not in methods:
+                            continue
+                    name = item.get("id") or item.get("name") or ""
+                elif isinstance(item, str):
+                    name = item
+                else:
+                    name = ""
+                name = str(name).strip()
+                if name.startswith("models/"):
+                    name = name[len("models/"):]
+                if name:
+                    models.append(name)
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                name = item.get("id") or item.get("name") or ""
+            elif isinstance(item, str):
+                name = item
+            else:
+                name = ""
+            name = str(name).strip()
+            if name.startswith("models/"):
+                name = name[len("models/"):]
+            if name:
+                models.append(name)
+
+    seen = set()
+    deduped = []
+    for m in models:
+        m = m.strip()
+        if m and m not in seen:
+            seen.add(m)
+            deduped.append(m)
+    return deduped
+
+
+def fetch_remote_models(
+    base_url: str,
+    api_key: str = "",
+    timeout: float = 15.0,
+    proxy: Optional[str] = None,
+) -> List[str]:
+    """Fetch available model IDs from provider endpoint."""
+    import requests
+
+    base_url = str(base_url or "").strip()
+    if not base_url:
+        raise ValueError("Base URL cannot be empty")
+
+    candidates = get_candidate_model_endpoints(base_url, api_key)
+    if not candidates:
+        raise ValueError(f"Invalid Base URL: {base_url}")
+
+    proxies = None
+    if proxy:
+        proxies = {"http": proxy, "https": proxy}
+
+    last_error: Optional[Exception] = None
+    auth_failed: bool = False
+
+    for endpoint in candidates:
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "BallonsTranslator/1.0",
+        }
+        params = {}
+        is_native_gemini = "generativelanguage.googleapis.com" in endpoint and "/openai/" not in endpoint
+
+        if is_native_gemini:
+            if api_key:
+                headers["x-goog-api-key"] = api_key
+                params["key"] = api_key
+        else:
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+        try:
+            resp = requests.get(
+                endpoint,
+                headers=headers,
+                params=params if params else None,
+                timeout=timeout,
+                proxies=proxies,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                models = _extract_model_ids(data)
+                if models:
+                    return models
+            elif resp.status_code in (401, 403):
+                auth_failed = True
+                msg = resp.text[:200]
+                try:
+                    err_json = resp.json()
+                    if isinstance(err_json, dict) and "error" in err_json:
+                        err_val = err_json["error"]
+                        if isinstance(err_val, dict):
+                            msg = err_val.get("message", msg)
+                        elif isinstance(err_val, str):
+                            msg = err_val
+                except Exception:
+                    pass
+                last_error = RuntimeError(f"Authentication failed (HTTP {resp.status_code}): {msg}")
+                break
+            else:
+                last_error = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        except Exception as exc:
+            last_error = exc
+
+    if auth_failed and last_error:
+        raise last_error
+
+    if last_error:
+        raise RuntimeError(f"{last_error}")
+
+    return []
+

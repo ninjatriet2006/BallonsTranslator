@@ -1,10 +1,11 @@
 import copy
 import json
 import uuid
-from typing import get_type_hints
+from typing import Dict, List, Optional, get_type_hints
 
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QMessageBox,
     QPlainTextEdit,
     QGridLayout,
@@ -21,8 +22,9 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QStyle,
     QStyleOptionGroupBox,
+    QToolTip,
 )
-from qtpy.QtCore import QEvent, QRectF, QTimer, Qt, Signal
+from qtpy.QtCore import QEvent, QPoint, QRect, QRectF, QTimer, Qt, Signal, QThread
 from qtpy.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 
 try:
@@ -48,6 +50,7 @@ from ballontranslator.utils.llm_profiles import (
     LLM_TRANSLATOR_KEY,
     LLMProfile,
     copy_profile,
+    fetch_remote_models,
     profile_by_id,
     profile_to_export_dict,
     profiles_from_json,
@@ -55,6 +58,25 @@ from ballontranslator.utils.llm_profiles import (
     resolve_api_key,
     store_api_key,
 )
+
+
+class ModelFetchThread(QThread):
+    """Worker thread to query models without blocking the UI."""
+    fetched = Signal(str, list)
+    failed = Signal(str, str)
+
+    def __init__(self, modality: str, base_url: str, api_key: str = "", parent=None):
+        super().__init__(parent)
+        self.modality = modality
+        self.base_url = base_url
+        self.api_key = api_key
+
+    def run(self):
+        try:
+            models = fetch_remote_models(self.base_url, self.api_key)
+            self.fetched.emit(self.modality, models)
+        except Exception as exc:
+            self.failed.emit(self.modality, str(exc))
 
 
 PROFILE_COMMON_PARAM_DEFS = [
@@ -385,6 +407,7 @@ class ProfileCardWidget(QGroupBox):
         self._previous_vision_model_text = ''
         self._previous_image_model_text = ''
         self._action_buttons_visible = False
+        self._fetch_threads = {}
         self.profile_param_display_names = {
             'base_url': self.tr('Base URL'),
             'image_base_url': self.tr('Image Base URL'),
@@ -524,10 +547,16 @@ class ProfileCardWidget(QGroupBox):
         self.model_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.model_label.clicked.connect(self.toggleTextSupport)
         model_tooltip = self.tr('Text translation model used by LLMTranslator.')
+        self.fetch_model_btn = QToolButton(self)
+        self.fetch_model_btn.setObjectName('LLMProfileModelFetchButton')
+        self.fetch_model_btn.setIcon(QIcon(themed_icon_path('fontfmt_reload.svg')))
+        self.fetch_model_btn.setToolTip(self.tr('Fetch models from API'))
+        self.fetch_model_btn.setFixedSize(16, 16)
+        self.fetch_model_btn.clicked.connect(lambda: self.fetchModels('text'))
         self.add_model_btn = QToolButton(self)
         self.add_model_btn.setObjectName('LLMProfileModelAddButton')
         self.add_model_btn.setIcon(QIcon(themed_icon_path('add.svg')))
-        self.add_model_btn.setToolTip(self.tr('Add model'))
+        self.add_model_btn.setToolTip(self.tr('Add model manually'))
         self.add_model_btn.setFixedSize(16, 16)
         self.add_model_btn.clicked.connect(self.startModelEdit)
         self.remove_model_btn = QToolButton(self)
@@ -545,6 +574,7 @@ class ProfileCardWidget(QGroupBox):
         model_label_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         model_label_row.addWidget(self.text_badge, 0, Qt.AlignmentFlag.AlignLeft)
         model_label_row.addWidget(self.model_label, 0, Qt.AlignmentFlag.AlignLeft)
+        model_label_row.addWidget(self.fetch_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         model_label_row.addWidget(self.add_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         model_label_row.addWidget(self.remove_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         model_label_row.addStretch(1)
@@ -568,10 +598,16 @@ class ProfileCardWidget(QGroupBox):
         self.vision_model_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.vision_model_label.clicked.connect(self.toggleVisionSupport)
         vision_model_tooltip = self.tr('Model used by LLMOCR for image OCR.')
+        self.fetch_vision_model_btn = QToolButton(self)
+        self.fetch_vision_model_btn.setObjectName('LLMProfileModelFetchButton')
+        self.fetch_vision_model_btn.setIcon(QIcon(themed_icon_path('fontfmt_reload.svg')))
+        self.fetch_vision_model_btn.setToolTip(self.tr('Fetch models from API'))
+        self.fetch_vision_model_btn.setFixedSize(16, 16)
+        self.fetch_vision_model_btn.clicked.connect(lambda: self.fetchModels('vision'))
         self.add_vision_model_btn = QToolButton(self)
         self.add_vision_model_btn.setObjectName('LLMProfileModelAddButton')
         self.add_vision_model_btn.setIcon(QIcon(themed_icon_path('add.svg')))
-        self.add_vision_model_btn.setToolTip(self.tr('Add vision model'))
+        self.add_vision_model_btn.setToolTip(self.tr('Add vision model manually'))
         self.add_vision_model_btn.setFixedSize(16, 16)
         self.add_vision_model_btn.clicked.connect(self.startVisionModelEdit)
         self.remove_vision_model_btn = QToolButton(self)
@@ -592,6 +628,7 @@ class ProfileCardWidget(QGroupBox):
         vision_model_label_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         vision_model_label_row.addWidget(self.vision_badge, 0, Qt.AlignmentFlag.AlignLeft)
         vision_model_label_row.addWidget(self.vision_model_label, 0, Qt.AlignmentFlag.AlignLeft)
+        vision_model_label_row.addWidget(self.fetch_vision_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         vision_model_label_row.addWidget(self.add_vision_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         vision_model_label_row.addWidget(self.remove_vision_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         vision_model_label_row.addStretch(1)
@@ -620,10 +657,16 @@ class ProfileCardWidget(QGroupBox):
         self.image_model_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.image_model_label.clicked.connect(self.toggleImageSupport)
         image_model_tooltip = self.tr('Model used by LLMInpaint for image cleanup.')
+        self.fetch_image_model_btn = QToolButton(self)
+        self.fetch_image_model_btn.setObjectName('LLMProfileModelFetchButton')
+        self.fetch_image_model_btn.setIcon(QIcon(themed_icon_path('fontfmt_reload.svg')))
+        self.fetch_image_model_btn.setToolTip(self.tr('Fetch models from API'))
+        self.fetch_image_model_btn.setFixedSize(16, 16)
+        self.fetch_image_model_btn.clicked.connect(lambda: self.fetchModels('image'))
         self.add_image_model_btn = QToolButton(self)
         self.add_image_model_btn.setObjectName('LLMProfileModelAddButton')
         self.add_image_model_btn.setIcon(QIcon(themed_icon_path('add.svg')))
-        self.add_image_model_btn.setToolTip(self.tr('Add image model'))
+        self.add_image_model_btn.setToolTip(self.tr('Add image model manually'))
         self.add_image_model_btn.setFixedSize(16, 16)
         self.add_image_model_btn.clicked.connect(self.startImageModelEdit)
         self.remove_image_model_btn = QToolButton(self)
@@ -644,6 +687,7 @@ class ProfileCardWidget(QGroupBox):
         image_model_label_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         image_model_label_row.addWidget(self.image_badge, 0, Qt.AlignmentFlag.AlignLeft)
         image_model_label_row.addWidget(self.image_model_label, 0, Qt.AlignmentFlag.AlignLeft)
+        image_model_label_row.addWidget(self.fetch_image_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         image_model_label_row.addWidget(self.add_image_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         image_model_label_row.addWidget(self.remove_image_model_btn, 0, Qt.AlignmentFlag.AlignLeft)
         image_model_label_row.addStretch(1)
@@ -1011,10 +1055,13 @@ class ProfileCardWidget(QGroupBox):
         self._action_buttons_visible = visible
         self.more_btn.setVisible(visible)
         self.delete_btn.setVisible(visible)
+        self.fetch_model_btn.setVisible(visible and bool(self.profile.support_text))
         self.add_model_btn.setVisible(visible and bool(self.profile.support_text))
         self.remove_model_btn.setVisible(visible and bool(self.profile.support_text))
+        self.fetch_vision_model_btn.setVisible(visible and bool(self.profile.support_vision))
         self.add_vision_model_btn.setVisible(visible and bool(self.profile.support_vision))
         self.remove_vision_model_btn.setVisible(visible and bool(self.profile.support_vision))
+        self.fetch_image_model_btn.setVisible(visible and bool(self.profile.support_image))
         self.add_image_model_btn.setVisible(visible and bool(self.profile.support_image))
         self.remove_image_model_btn.setVisible(visible and bool(self.profile.support_image))
 
@@ -1342,6 +1389,164 @@ class ProfileCardWidget(QGroupBox):
         if emit_changed:
             self.profile_changed.emit()
             self.profile_summary_changed.emit()
+
+    def _get_modality_fetch_btn(self, modality: str) -> Optional[QToolButton]:
+        if modality == 'vision':
+            return getattr(self, 'fetch_vision_model_btn', None)
+        elif modality == 'image':
+            return getattr(self, 'fetch_image_model_btn', None)
+        elif modality == 'text':
+            return getattr(self, 'fetch_model_btn', None)
+        return None
+
+    def fetchModels(self, modality: str = 'text') -> None:
+        if self._model_editing:
+            self.finishModelEdit()
+        if self._vision_model_editing:
+            self.finishVisionModelEdit()
+        if self._image_model_editing:
+            self.finishImageModelEdit()
+
+        if modality in self._fetch_threads:
+            return
+
+        api_key = self.api_key_widget.text().strip()
+        if not api_key:
+            api_key = resolve_api_key(self.profile) or ''
+        else:
+            store_api_key(self.profile, api_key)
+
+        btn = self._get_modality_fetch_btn(modality)
+
+        if self.profile.require_api_key and not api_key:
+            if btn is not None:
+                QToolTip.showText(
+                    btn.mapToGlobal(QPoint(0, btn.height())),
+                    self.tr('Please enter an API Key first.'),
+                    btn,
+                    QRect(),
+                    3000,
+                )
+            self.api_key_widget.setFocus()
+            return
+
+        base_url_widget = self.details.param_widgets.get('base_url')
+        if isinstance(base_url_widget, QLineEdit) and base_url_widget.text().strip():
+            self.profile.base_url = base_url_widget.text().strip()
+
+        img_url_widget = self.details.param_widgets.get('image_base_url')
+        if isinstance(img_url_widget, QLineEdit) and img_url_widget.text().strip():
+            self.profile.image_base_url = img_url_widget.text().strip()
+
+        if modality == 'image':
+            base_url = getattr(self.profile, 'image_base_url', '') or getattr(self.profile, 'base_url', '')
+        else:
+            base_url = getattr(self.profile, 'base_url', '')
+
+        if not base_url.strip():
+            if btn is not None:
+                QToolTip.showText(
+                    btn.mapToGlobal(QPoint(0, btn.height())),
+                    self.tr('Please configure Base URL first.'),
+                    btn,
+                    QRect(),
+                    3000,
+                )
+            return
+
+        if btn is not None:
+            btn.setEnabled(False)
+            btn.setToolTip(self.tr('Fetching models...'))
+
+        thread = ModelFetchThread(modality, base_url, api_key, parent=self)
+        thread.fetched.connect(self._on_models_fetched)
+        thread.failed.connect(self._on_models_failed)
+        self._fetch_threads[modality] = thread
+        thread.start()
+
+    def _on_models_fetched(self, modality: str, models: list):
+        btn = self._get_modality_fetch_btn(modality)
+        if btn is not None:
+            btn.setEnabled(True)
+            btn.setToolTip(self.tr('Fetch models from API'))
+        self._fetch_threads.pop(modality, None)
+
+        if not models:
+            QMessageBox.information(
+                self,
+                self.tr('Fetch Models'),
+                self.tr('No models returned by server. You can enter model names manually using the "+" button.'),
+            )
+            return
+
+        if modality == 'vision':
+            combo = self.vision_model_combo
+            options_attr = 'vision_model_options'
+            model_attr = 'vision_model'
+        elif modality == 'image':
+            combo = self.image_model_combo
+            options_attr = 'image_model_options'
+            model_attr = 'image_model'
+        else:
+            combo = self.model_combo
+            options_attr = 'model_options'
+            model_attr = 'model'
+
+        current_options = getattr(self.profile, options_attr) or []
+        merged = list(models)
+        for opt in current_options:
+            if opt not in merged:
+                merged.append(opt)
+
+        setattr(self.profile, options_attr, merged)
+        current_val = combo.currentText()
+        target_val = current_val if current_val in merged else (merged[0] if merged else '')
+        self._syncComboBox(combo, merged, target_val)
+        setattr(self.profile, model_attr, target_val)
+
+        if modality == 'vision':
+            for m in models:
+                if m not in self.profile.model_options:
+                    self.profile.model_options.append(m)
+            self._syncComboBox(
+                self.model_combo,
+                self.profile.model_options,
+                self.profile.model,
+            )
+
+        self.profile_changed.emit()
+        self.profile_summary_changed.emit()
+        combo.showPopup()
+        if btn is not None:
+            QToolTip.showText(
+                btn.mapToGlobal(QPoint(0, btn.height())),
+                self.tr('Successfully fetched {count} models.').format(count=len(models)),
+                btn,
+                QRect(),
+                3000,
+            )
+
+    def _on_models_failed(self, modality: str, error_msg: str):
+        btn = self._get_modality_fetch_btn(modality)
+        if btn is not None:
+            btn.setEnabled(True)
+            btn.setToolTip(self.tr('Fetch models from API'))
+        self._fetch_threads.pop(modality, None)
+
+        QMessageBox.warning(
+            self,
+            self.tr('Fetch Models Failed'),
+            self.tr(
+                'Could not fetch models automatically:\n{error}\n\n'
+                'You can still type the model name manually by clicking the "+" button.'
+            ).format(error=error_msg),
+        )
+
+    def cleanup_fetch_threads(self):
+        for thread in list(self._fetch_threads.values()):
+            if thread.isRunning():
+                thread.wait(500)
+        self._fetch_threads.clear()
 
     def on_api_key_finished(self):
         store_api_key(self.profile, self.api_key_widget.text())
@@ -1746,6 +1951,7 @@ class LLMProfilesWidget(QWidget):
             pcfg.module.inpaint_llm_id = pcfg.module.llm_profiles[0].id
         row = self.rows.pop(profile_id, None)
         if row is not None:
+            row.cleanup_fetch_threads()
             row.collapse()
             self.rows_layout.removeWidget(row)
             row.deleteLater()

@@ -3,7 +3,7 @@ import time
 import datetime
 
 from qtpy.QtWidgets import QDialog, QLabel, QHBoxLayout, QVBoxLayout, QMessageBox, QSizePolicy, QProgressBar, QPushButton
-from qtpy.QtGui import  QCloseEvent, QShowEvent
+from qtpy.QtGui import QCloseEvent, QShowEvent, QMoveEvent
 from qtpy.QtCore import Qt, Signal
 
 from ballontranslator.utils.shared import remove_from_runtime_widget_set, add_to_runtime_widget_set
@@ -201,6 +201,15 @@ class ImgtransProgressMessageBox(ProgressMessageBox):
     
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(None, False, *args, **kwargs)
+        self.setModal(False)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+        )
+        self.setWindowTitle(self.tr('Translation Progress'))
+        self._user_moved = False
         
         self.detect_bar = TaskProgressBar(self.tr('Detecting: '), True, self)
         self.ocr_bar = TaskProgressBar(self.tr('OCR: '), True, self)
@@ -238,6 +247,15 @@ class ImgtransProgressMessageBox(ProgressMessageBox):
         # 重置按钮状态（为下次使用准备）
         self.stop_button.setEnabled(False)
         self.stop_button.setText(self.tr('trying to stop...'))
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.on_stop_clicked()
+        event.accept()
+
+    def moveEvent(self, event: QMoveEvent) -> None:
+        if self.isVisible():
+            self._user_moved = True
+        super().moveEvent(event)
 
 
     def updateDetectProgress(self, value: int, msg: str = ''):

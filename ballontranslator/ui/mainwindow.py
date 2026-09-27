@@ -777,8 +777,8 @@ class MainWindow(mainwindow_cls):
             button.set_busy(busy)
 
     def on_show_only_custom_font(self, only_custom: bool) -> None:
-        registry = shared.FONT_REGISTRY
-        entries = registry.entries(only_custom, pcfg.excluded_fonts)
+        registry = getattr(shared, 'FONT_REGISTRY', None)
+        entries = registry.entries(only_custom, pcfg.excluded_fonts) if registry is not None else []
         self.textPanel.formatpanel.update_font_entries(entries)
 
     def openDir(self, directory: str):
@@ -2124,10 +2124,20 @@ class MainWindow(mainwindow_cls):
             msgbox = self.module_manager.progress_msgbox
         if hasattr(msgbox, 'fit_to_content'):
             msgbox.fit_to_content()
+        if getattr(msgbox, '_user_moved', False):
+            return
         msg_size = msgbox.size()
-        size = self.size()
-        p = self.mapToGlobal(QPoint(size.width() - msg_size.width(),
-                                    size.height() - msg_size.height()))
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        screen_geo = screen.availableGeometry() if screen else None
+        main_geo = self.frameGeometry()
+        if screen_geo and (main_geo.right() + msg_size.width() + 10 <= screen_geo.right()):
+            p = QPoint(main_geo.right() + 8, main_geo.top() + 60)
+        elif screen_geo and (main_geo.left() - msg_size.width() - 10 >= screen_geo.left()):
+            p = QPoint(main_geo.left() - msg_size.width() - 8, main_geo.top() + 60)
+        else:
+            size = self.size()
+            p = self.mapToGlobal(QPoint(max(0, size.width() - msg_size.width() - 20),
+                                        max(0, size.height() - msg_size.height() - 20)))
         msgbox.move(p)
 
     def on_closebtn_clicked(self):

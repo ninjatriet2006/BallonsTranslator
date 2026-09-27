@@ -832,7 +832,24 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         llm_ocr_layout.addWidget(self.llm_ocr_threads_spin)
         llm_threads_layout.addLayout(llm_ocr_layout)
 
-        # 3. LLM Request Delay (Cooldown)
+        # 3. LLM Inpaint Threads
+        llm_inp_layout = QHBoxLayout()
+        llm_inp_layout.setContentsMargins(0, 0, 0, 0)
+        llm_inp_layout.setSpacing(6)
+        llm_inp_label = ConfigTextLabel(self.tr('LLM Inpaint Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        llm_inp_tooltip = self.tr('Concurrent worker threads for LLM image cleanup/inpainting (1-16).')
+        llm_inp_label.setToolTip(llm_inp_tooltip)
+        self.llm_inpaint_threads_spin = QSpinBox(self)
+        self.llm_inpaint_threads_spin.setObjectName('PipelineLLMInpaintThreadsSpin')
+        self.llm_inpaint_threads_spin.setRange(1, 16)
+        self.llm_inpaint_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.llm_inpaint_threads_spin.setToolTip(llm_inp_tooltip)
+        self.llm_inpaint_threads_spin.valueChanged.connect(self.on_llm_inpaint_threads_changed)
+        llm_inp_layout.addWidget(llm_inp_label)
+        llm_inp_layout.addWidget(self.llm_inpaint_threads_spin)
+        llm_threads_layout.addLayout(llm_inp_layout)
+
+        # 4. LLM Request Delay (Cooldown)
         llm_delay_layout = QHBoxLayout()
         llm_delay_layout.setContentsMargins(0, 0, 0, 0)
         llm_delay_layout.setSpacing(6)
@@ -879,7 +896,41 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         local_det_layout.addWidget(self.local_detect_threads_spin)
         local_threads_layout.addLayout(local_det_layout)
 
-        # 2. Local Inpaint Threads
+        # 2. Local OCR Threads
+        local_ocr_layout = QHBoxLayout()
+        local_ocr_layout.setContentsMargins(0, 0, 0, 0)
+        local_ocr_layout.setSpacing(6)
+        local_ocr_label = ConfigTextLabel(self.tr('Local OCR Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        local_ocr_tooltip = self.tr('Worker threads for local OCR models like PaddleVL, MIT, PP-OCR (1-4).')
+        local_ocr_label.setToolTip(local_ocr_tooltip)
+        self.local_ocr_threads_spin = QSpinBox(self)
+        self.local_ocr_threads_spin.setObjectName('PipelineLocalOCRThreadsSpin')
+        self.local_ocr_threads_spin.setRange(1, 4)
+        self.local_ocr_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.local_ocr_threads_spin.setToolTip(local_ocr_tooltip)
+        self.local_ocr_threads_spin.valueChanged.connect(self.on_local_ocr_threads_changed)
+        local_ocr_layout.addWidget(local_ocr_label)
+        local_ocr_layout.addWidget(self.local_ocr_threads_spin)
+        local_threads_layout.addLayout(local_ocr_layout)
+
+        # 3. Local Trans Threads
+        local_trans_layout = QHBoxLayout()
+        local_trans_layout.setContentsMargins(0, 0, 0, 0)
+        local_trans_layout.setSpacing(6)
+        local_trans_label = ConfigTextLabel(self.tr('Local Trans Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        local_trans_tooltip = self.tr('Worker threads for local translation models like Sakura, M2M100, Sugoi (1-4).')
+        local_trans_label.setToolTip(local_trans_tooltip)
+        self.local_translate_threads_spin = QSpinBox(self)
+        self.local_translate_threads_spin.setObjectName('PipelineLocalTransThreadsSpin')
+        self.local_translate_threads_spin.setRange(1, 4)
+        self.local_translate_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.local_translate_threads_spin.setToolTip(local_trans_tooltip)
+        self.local_translate_threads_spin.valueChanged.connect(self.on_local_translate_threads_changed)
+        local_trans_layout.addWidget(local_trans_label)
+        local_trans_layout.addWidget(self.local_translate_threads_spin)
+        local_threads_layout.addLayout(local_trans_layout)
+
+        # 4. Local Inpaint Threads
         local_inp_layout = QHBoxLayout()
         local_inp_layout.setContentsMargins(0, 0, 0, 0)
         local_inp_layout.setSpacing(6)
@@ -1522,12 +1573,24 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         pcfg.module.llm_ocr_threads = val
         self.save_config.emit()
 
+    def on_llm_inpaint_threads_changed(self, val: int):
+        pcfg.module.llm_inpaint_threads = val
+        self.save_config.emit()
+
     def on_llm_request_delay_changed(self, val: float):
         pcfg.module.llm_request_delay = val
         self.save_config.emit()
 
     def on_local_detect_threads_changed(self, val: int):
         pcfg.module.local_detect_threads = val
+        self.save_config.emit()
+
+    def on_local_ocr_threads_changed(self, val: int):
+        pcfg.module.local_ocr_threads = val
+        self.save_config.emit()
+
+    def on_local_translate_threads_changed(self, val: int):
+        pcfg.module.local_translate_threads = val
         self.save_config.emit()
 
     def on_local_inpaint_threads_changed(self, val: int):
@@ -2012,8 +2075,11 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         self.package_auto_install_checker.setChecked(pcfg.package_manager.auto_install_missing_packages)
         self.llm_translate_threads_spin.setValue(getattr(pcfg.module, 'llm_translate_threads', getattr(pcfg.module, 'llm_threads', 4)))
         self.llm_ocr_threads_spin.setValue(getattr(pcfg.module, 'llm_ocr_threads', 2))
+        self.llm_inpaint_threads_spin.setValue(getattr(pcfg.module, 'llm_inpaint_threads', 2))
         self.llm_delay_spin.setValue(getattr(pcfg.module, 'llm_request_delay', 0.0))
         self.local_detect_threads_spin.setValue(getattr(pcfg.module, 'local_detect_threads', 1))
+        self.local_ocr_threads_spin.setValue(getattr(pcfg.module, 'local_ocr_threads', 1))
+        self.local_translate_threads_spin.setValue(getattr(pcfg.module, 'local_translate_threads', 1))
         self.local_inpaint_threads_spin.setValue(getattr(pcfg.module, 'local_inpaint_threads', getattr(pcfg.module, 'local_threads', 1)))
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
 
