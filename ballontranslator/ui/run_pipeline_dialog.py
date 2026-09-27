@@ -809,6 +809,26 @@ class RunPipelineDialog(QDialog):
             pcfg.module,
             'ocr_llm_sort_reading_order',
         )
+        llm_ocr_threads_row = QWidget(self.llm_ocr_settings)
+        llm_ocr_threads_layout = QHBoxLayout(llm_ocr_threads_row)
+        llm_ocr_threads_layout.setContentsMargins(0, 4, 0, 0)
+        llm_ocr_threads_layout.setSpacing(8)
+        threads_label = QLabel(self.tr('Threads'), llm_ocr_threads_row)
+        threads_label.setObjectName('RunPipelineSettingLabel')
+        llm_ocr_threads_layout.addWidget(threads_label)
+        llm_ocr_threads_layout.addStretch()
+        self.llm_ocr_threads_spinbox = PageRangeSpinBox(llm_ocr_threads_row)
+        self.llm_ocr_threads_spinbox.setObjectName('RunPipelineLLMOCRThreadsSpinBox')
+        self.llm_ocr_threads_spinbox.setRange(1, 16)
+        self.llm_ocr_threads_spinbox.setFixedWidth(RUN_PIPELINE_SETTING_CONTROL_WIDTH)
+        self.llm_ocr_threads_spinbox.setValue(getattr(pcfg.module, 'llm_ocr_threads', 2))
+        ocr_threads_help = self.tr('Concurrent worker threads for LLM OCR (1-16).')
+        threads_label.setToolTip(ocr_threads_help)
+        self.llm_ocr_threads_spinbox.setToolTip(ocr_threads_help)
+        self.llm_ocr_threads_spinbox.valueChanged.connect(self._on_llm_ocr_threads_changed)
+        llm_ocr_threads_layout.addWidget(self.llm_ocr_threads_spinbox)
+        llm_ocr_layout.addWidget(llm_ocr_threads_row)
+
         self.llm_ocr_page_level.toggled.connect(
             self._sync_llm_ocr_option_state
         )
@@ -1205,6 +1225,31 @@ class RunPipelineDialog(QDialog):
         ))
         translation_grid.addWidget(llm_features_row, 4, 0, 1, 2)
 
+        llm_threads_row = QWidget(section)
+        self.llm_threads_row = llm_threads_row
+        llm_threads_row.setObjectName('RunPipelineGeneralSettingRow')
+        llm_threads_layout = QHBoxLayout(llm_threads_row)
+        llm_threads_layout.setContentsMargins(0, 0, 0, 0)
+        llm_threads_layout.setSpacing(8)
+        threads_label = QLabel(self.tr('Threads'), llm_threads_row)
+        threads_label.setObjectName('RunPipelineSettingLabel')
+        llm_threads_layout.addWidget(threads_label)
+        llm_threads_layout.addStretch()
+        self.llm_threads_spinbox = PageRangeSpinBox(llm_threads_row)
+        self.llm_threads_spinbox.setObjectName('RunPipelineLLMThreadsSpinBox')
+        self.llm_threads_spinbox.setRange(1, 16)
+        self.llm_threads_spinbox.setFixedWidth(RUN_PIPELINE_SETTING_CONTROL_WIDTH)
+        self.llm_threads_spinbox.setValue(getattr(pcfg.module, 'llm_threads', 4))
+        threads_help = self.tr(
+            'Concurrent worker threads for LLM translation (1-16). '
+            'Automatically clamped to 1 when history or sequential memory is enabled.'
+        )
+        threads_label.setToolTip(threads_help)
+        self.llm_threads_spinbox.setToolTip(threads_help)
+        llm_threads_layout.addWidget(self.llm_threads_spinbox)
+        llm_threads_row.setVisible(self._llm_settings_visible)
+        translation_grid.addWidget(llm_threads_row, 5, 0)
+
         self.context_row.setVisible(not self._llm_settings_visible)
 
         self.source_combobox.currentTextChanged.connect(
@@ -1237,6 +1282,9 @@ class RunPipelineDialog(QDialog):
         )
         self.llm_overwrite_summary_checkbox.toggled.connect(
             self._on_llm_overwrite_summary_toggled
+        )
+        self.llm_threads_spinbox.valueChanged.connect(
+            self._on_llm_threads_changed
         )
         self._sync_llm_overwrite_summary_visibility()
 
@@ -1271,6 +1319,29 @@ class RunPipelineDialog(QDialog):
         self.llm_context_budget_row.setVisible(self._llm_settings_visible)
         self.glossary_row.setVisible(self._llm_settings_visible)
         self.glossary_mode_row.setVisible(self._llm_settings_visible)
+        self.llm_threads_row.setVisible(self._llm_settings_visible)
+        profile_concurrency = 0
+        if self.translator_metadata.get('name') == LLM_TRANSLATOR_KEY:
+            profile = runtime_profile(pcfg.module.llm_profiles, pcfg.module.translator_llm_id)
+            profile_concurrency = getattr(profile, 'concurrency', 0)
+
+        blocker = QSignalBlocker(self.llm_threads_spinbox)
+        if profile_concurrency > 0:
+            self.llm_threads_spinbox.setValue(profile_concurrency)
+            self.llm_threads_spinbox.setToolTip(
+                self.tr('Overridden by active LLM Profile concurrency ({profile_concurrency}).').format(
+                    profile_concurrency=profile_concurrency
+                )
+            )
+        else:
+            self.llm_threads_spinbox.setValue(getattr(pcfg.module, 'llm_translate_threads', getattr(pcfg.module, 'llm_threads', 4)))
+            self.llm_threads_spinbox.setToolTip(
+                self.tr(
+                    'Concurrent worker threads for LLM translation (1-16). '
+                    'Automatically clamped to 1 when history or sequential memory is enabled.'
+                )
+            )
+        del blocker
         self._sync_llm_overwrite_summary_visibility()
         self._fit_to_current_workflow()
 
@@ -1317,6 +1388,13 @@ class RunPipelineDialog(QDialog):
 
     def _on_prior_context_token_budget_changed(self, budget: int):
         pcfg.module.llm_prior_context_token_budget = budget
+
+    def _on_llm_threads_changed(self, threads: int) -> None:
+        pcfg.module.llm_translate_threads = threads
+        pcfg.module.llm_threads = threads
+
+    def _on_llm_ocr_threads_changed(self, threads: int) -> None:
+        pcfg.module.llm_ocr_threads = threads
 
     def _on_glossary_path_changed(self, path: str):
         self._set_glossary_path_display(path)

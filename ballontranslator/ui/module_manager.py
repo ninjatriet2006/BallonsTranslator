@@ -1,4 +1,5 @@
 import threading
+import concurrent.futures
 from typing import Callable, List, Optional, Union
 import os.path as osp
 
@@ -42,7 +43,7 @@ from ballontranslator.utils.py_package_manager import (
 from .custom_widget import ImgtransProgressMessageBox, ParamComboBox, ProgressMessageBox
 from .configpanel import ConfigPanel
 from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-from ballontranslator.utils.config import pcfg, RunStatus, save_config
+from ballontranslator.utils.config import pcfg, RunStatus, save_config, LLMTranslateContext
 from ballontranslator.utils.llm_profiles import LLM_INPAINT_KEY, LLM_OCR_KEY
 from ballontranslator.utils.global_callbacks import register_global_callback
 cfg_module = pcfg.module
@@ -488,6 +489,7 @@ class TranslateThread(ModuleThread):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__('translator', TRANSLATORS, *args, **kwargs)
         self.translator: BaseTranslator = self.module
+        self._queue_lock = threading.Lock()
 
     def _set_translator(self, translator: str):
         
@@ -652,57 +654,142 @@ class TranslateThread(ModuleThread):
             )
         return success
 
+    def initImgtransPipeline(self, proj: ProjImgTrans, stop_event: threading.Event = None):
+        super().initImgtransPipeline(proj, stop_event)
+        with self._queue_lock:
+            self.pipeline_pagekey_queue.clear()
+
     def push_pagekey_queue(self, page_key: str):
-        self.pipeline_pagekey_queue.append(page_key)
+        with self._queue_lock:
+            self.pipeline_pagekey_queue.append(page_key)
 
     def runTranslatePipeline(self, imgtrans_proj: ProjImgTrans, stop_event: threading.Event):
         self.initImgtransPipeline(imgtrans_proj, stop_event)
         self.job = self._run_translate_pipeline
         self.start()
 
+    def _handle_translate_error(self, e: Exception, page_key: str):
+        msg = '{}\n{}: {}'.format(
+            self.tr('Translation Failed.'),
+            self.tr('Page'),
+            page_key,
+        )
+        if isinstance(e, MissingTranslatorParams):
+            msg = msg + '\n' + self.tr('{param} is required for {translator}').format(
+                param=str(e),
+                translator=self.translator.name,
+            )
+        create_error_dialog(e, msg, 'TranslationFailed')
 
     def _run_translate_pipeline(self):
-        delay = self.translator.delay()
+        profile = getattr(self.translator, 'profile', None)
+        profile_delay = getattr(profile, 'request_delay', 0.0) if profile else 0.0
+        global_delay = getattr(pcfg.module, 'llm_request_delay', 0.0)
+        if profile_delay > 0:
+            delay = profile_delay
+        elif global_delay > 0:
+            delay = global_delay
+        else:
+            delay = self.translator.delay() if self.translator else 0
+
         stop_event = self.pipeline_stop_event or threading.Event()
 
-        while not self.pipeline_finished():
+        max_workers = 1
+        configured_workers = getattr(pcfg.module, 'llm_translate_threads', getattr(pcfg.module, 'llm_threads', 4))
+        profile_concurrency = getattr(profile, 'concurrency', 0) if profile else 0
+        if profile_concurrency > 0:
+            effective_configured_workers = profile_concurrency
+        else:
+            effective_configured_workers = configured_workers
+
+        if effective_configured_workers > 1 and self.translator is not None:
+            low_vram = getattr(self.translator, 'low_vram_mode', False)
+            heavy = getattr(self.translator, 'is_computational_intensive', lambda: False)()
+            history_context = getattr(pcfg.module, 'llm_translate_context', '') == LLMTranslateContext.HISTORY
+            summary_memory = getattr(pcfg.module, 'llm_translate_summary_memory', False)
+            if not low_vram and not heavy and not history_context and not summary_memory:
+                max_workers = max(1, min(16, int(effective_configured_workers)))
+
+        LOGGER.info(
+            f"Translation pipeline started with {max_workers} worker(s) "
+            f"(effective: {effective_configured_workers}, global: {configured_workers}, delay: {delay}s)."
+        )
+
+        if max_workers <= 1:
+            while not self.pipeline_finished():
+                if stop_event.is_set():
+                    self.module_thread_stopped.emit()
+                    break
+
+                page_key = None
+                with self._queue_lock:
+                    if len(self.pipeline_pagekey_queue) > 0:
+                        page_key = self.pipeline_pagekey_queue.pop(0)
+
+                if page_key is None:
+                    stop_event.wait(0.1)
+                    continue
+
+                self.blockSignals(True)
+                try:
+                    self._translate_page(self.imgtrans_proj, page_key)
+                except Exception as e:
+                    self._handle_translate_error(e, page_key)
+                finally:
+                    self.blockSignals(False)
+
+                self.finished_counter += 1
+                self.progress_changed.emit(self.finished_counter)
+
+                if not self.pipeline_finished() and delay > 0:
+                    stop_event.wait(delay)
+            return
+
+        active_futures = {}
+
+        def translate_worker(page_k: str):
             if stop_event.is_set():
-                self.module_thread_stopped.emit()
-                break
+                return False
+            return self._translate_page(self.imgtrans_proj, page_k)
 
-            if len(self.pipeline_pagekey_queue) == 0:
-                stop_event.wait(0.1)
-                continue
-            
-            page_key = self.pipeline_pagekey_queue.pop(0)
-            self.blockSignals(True)
-            try:
-                self._translate_page(self.imgtrans_proj, page_key)
-            except Exception as e:
-                # TODO: allowing retry/skip/terminate
-                msg = '{}\n{}: {}'.format(
-                    self.tr('Translation Failed.'),
-                    self.tr('Page'),
-                    page_key,
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while not self.pipeline_finished():
+                if stop_event.is_set():
+                    self.module_thread_stopped.emit()
+                    for fut in list(active_futures.keys()):
+                        fut.cancel()
+                    break
+
+                # Dispatch jobs while queue has items and capacity remains
+                with self._queue_lock:
+                    while len(active_futures) < max_workers and len(self.pipeline_pagekey_queue) > 0:
+                        next_page_key = self.pipeline_pagekey_queue.pop(0)
+                        fut = executor.submit(translate_worker, next_page_key)
+                        active_futures[fut] = next_page_key
+                        if delay > 0:
+                            stop_event.wait(delay)
+
+                if not active_futures and len(self.pipeline_pagekey_queue) == 0:
+                    if self.pipeline_finished():
+                        break
+                    stop_event.wait(0.05)
+                    continue
+
+                done, _ = concurrent.futures.wait(
+                    list(active_futures.keys()),
+                    timeout=0.1,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
                 )
-                if isinstance(e, MissingTranslatorParams):
-                    msg = msg + '\n' + self.tr('{param} is required for {translator}').format(
-                        param=str(e),
-                        translator=self.translator.name,
-                    )
-                    
-                self.blockSignals(False)
-                create_error_dialog(e, msg, 'TranslationFailed')
-                # self.imgtrans_proj = None
-                # self.finished_counter = 0
-                # self.pipeline_pagekey_queue = []
-                # return
-            self.blockSignals(False)
-            self.finished_counter += 1
-            self.progress_changed.emit(self.finished_counter)
 
-            if not self.pipeline_finished() and delay > 0:
-                stop_event.wait(delay)
+                for fut in done:
+                    p_key = active_futures.pop(fut, '')
+                    if not fut.cancelled():
+                        try:
+                            fut.result()
+                        except Exception as e:
+                            self._handle_translate_error(e, p_key)
+                        self.finished_counter += 1
+                        self.progress_changed.emit(self.finished_counter)
 
 
 class ImgtransThread(QThread):

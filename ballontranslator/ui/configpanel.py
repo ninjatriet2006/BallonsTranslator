@@ -5,7 +5,7 @@ from qtpy.QtWidgets import (
     QApplication, QPushButton, QLayout, QGridLayout, QHBoxLayout, QVBoxLayout,
     QTreeView, QWidget, QLabel, QSizePolicy, QSpacerItem, QCheckBox,
     QSplitter, QScrollArea, QLineEdit, QStackedWidget, QMessageBox,
-    QListWidget, QSpinBox, QProgressDialog, QFileDialog, QListWidgetItem,
+    QListWidget, QSpinBox, QDoubleSpinBox, QProgressDialog, QFileDialog, QListWidgetItem,
     QDialog, QAbstractItemView, QButtonGroup, QRadioButton,
     QFrame,
 )
@@ -788,6 +788,117 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         self.package_auto_install_checker.stateChanged.connect(self.on_package_auto_install_changed)
         pipeline_options_layout.addWidget(self.package_auto_install_checker)
 
+        # LLM Concurrency & Rate Limit Row
+        llm_threads_row = QWidget()
+        llm_threads_row.setObjectName('ConfigInlineRow')
+        llm_threads_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        llm_threads_layout = QHBoxLayout(llm_threads_row)
+        llm_threads_layout.setContentsMargins(0, 0, 0, 0)
+        llm_threads_layout.setSpacing(14)
+        llm_threads_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # 1. LLM Translation Threads
+        llm_trans_layout = QHBoxLayout()
+        llm_trans_layout.setContentsMargins(0, 0, 0, 0)
+        llm_trans_layout.setSpacing(6)
+        llm_trans_label = ConfigTextLabel(self.tr('LLM Trans Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        llm_trans_tooltip = self.tr('Concurrent worker threads for LLM translation (1-16). Can be overridden per LLM Profile.')
+        llm_trans_label.setToolTip(llm_trans_tooltip)
+        self.llm_translate_threads_spin = QSpinBox(self)
+        self.llm_translate_threads_spin.setObjectName('PipelineLLMTransThreadsSpin')
+        self.llm_translate_threads_spin.setRange(1, 16)
+        self.llm_translate_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.llm_translate_threads_spin.setToolTip(llm_trans_tooltip)
+        self.llm_translate_threads_spin.valueChanged.connect(self.on_llm_translate_threads_changed)
+        self.llm_threads_spin = self.llm_translate_threads_spin
+        llm_trans_layout.addWidget(llm_trans_label)
+        llm_trans_layout.addWidget(self.llm_translate_threads_spin)
+        llm_threads_layout.addLayout(llm_trans_layout)
+
+        # 2. LLM OCR Threads
+        llm_ocr_layout = QHBoxLayout()
+        llm_ocr_layout.setContentsMargins(0, 0, 0, 0)
+        llm_ocr_layout.setSpacing(6)
+        llm_ocr_label = ConfigTextLabel(self.tr('LLM OCR Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        llm_ocr_tooltip = self.tr('Concurrent worker threads for LLM OCR (1-16).')
+        llm_ocr_label.setToolTip(llm_ocr_tooltip)
+        self.llm_ocr_threads_spin = QSpinBox(self)
+        self.llm_ocr_threads_spin.setObjectName('PipelineLLMOCRThreadsSpin')
+        self.llm_ocr_threads_spin.setRange(1, 16)
+        self.llm_ocr_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.llm_ocr_threads_spin.setToolTip(llm_ocr_tooltip)
+        self.llm_ocr_threads_spin.valueChanged.connect(self.on_llm_ocr_threads_changed)
+        llm_ocr_layout.addWidget(llm_ocr_label)
+        llm_ocr_layout.addWidget(self.llm_ocr_threads_spin)
+        llm_threads_layout.addLayout(llm_ocr_layout)
+
+        # 3. LLM Request Delay (Cooldown)
+        llm_delay_layout = QHBoxLayout()
+        llm_delay_layout.setContentsMargins(0, 0, 0, 0)
+        llm_delay_layout.setSpacing(6)
+        llm_delay_label = ConfigTextLabel(self.tr('LLM Delay (s):'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        llm_delay_tooltip = self.tr('Minimum cooldown delay in seconds between requests (0.0-10.0s) to prevent HTTP 429 Too Many Requests. Can be overridden per LLM Profile.')
+        llm_delay_label.setToolTip(llm_delay_tooltip)
+        self.llm_delay_spin = QDoubleSpinBox(self)
+        self.llm_delay_spin.setObjectName('PipelineLLMDelaySpin')
+        self.llm_delay_spin.setRange(0.0, 10.0)
+        self.llm_delay_spin.setSingleStep(0.1)
+        self.llm_delay_spin.setDecimals(1)
+        self.llm_delay_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.llm_delay_spin.setToolTip(llm_delay_tooltip)
+        self.llm_delay_spin.valueChanged.connect(self.on_llm_request_delay_changed)
+        llm_delay_layout.addWidget(llm_delay_label)
+        llm_delay_layout.addWidget(self.llm_delay_spin)
+        llm_threads_layout.addLayout(llm_delay_layout)
+
+        pipeline_options_layout.addWidget(llm_threads_row)
+
+        # Local GPU Compute Row
+        local_threads_row = QWidget()
+        local_threads_row.setObjectName('ConfigInlineRow')
+        local_threads_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        local_threads_layout = QHBoxLayout(local_threads_row)
+        local_threads_layout.setContentsMargins(0, 0, 0, 0)
+        local_threads_layout.setSpacing(14)
+        local_threads_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # 1. Local Detect Threads
+        local_det_layout = QHBoxLayout()
+        local_det_layout.setContentsMargins(0, 0, 0, 0)
+        local_det_layout.setSpacing(6)
+        local_det_label = ConfigTextLabel(self.tr('Local Detect Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        local_det_tooltip = self.tr('Worker threads for local Text Detection models (1-4).')
+        local_det_label.setToolTip(local_det_tooltip)
+        self.local_detect_threads_spin = QSpinBox(self)
+        self.local_detect_threads_spin.setObjectName('PipelineLocalDetectThreadsSpin')
+        self.local_detect_threads_spin.setRange(1, 4)
+        self.local_detect_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.local_detect_threads_spin.setToolTip(local_det_tooltip)
+        self.local_detect_threads_spin.valueChanged.connect(self.on_local_detect_threads_changed)
+        local_det_layout.addWidget(local_det_label)
+        local_det_layout.addWidget(self.local_detect_threads_spin)
+        local_threads_layout.addLayout(local_det_layout)
+
+        # 2. Local Inpaint Threads
+        local_inp_layout = QHBoxLayout()
+        local_inp_layout.setContentsMargins(0, 0, 0, 0)
+        local_inp_layout.setSpacing(6)
+        local_inp_label = ConfigTextLabel(self.tr('Local Inpaint Threads:'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        local_inp_tooltip = self.tr('Worker threads for local Inpainting models like LaMa (1-4).')
+        local_inp_label.setToolTip(local_inp_tooltip)
+        self.local_inpaint_threads_spin = QSpinBox(self)
+        self.local_inpaint_threads_spin.setObjectName('PipelineLocalInpaintThreadsSpin')
+        self.local_inpaint_threads_spin.setRange(1, 4)
+        self.local_inpaint_threads_spin.setFixedWidth(CONFIG_COMBOBOX_SHORT)
+        self.local_inpaint_threads_spin.setToolTip(local_inp_tooltip)
+        self.local_inpaint_threads_spin.valueChanged.connect(self.on_local_inpaint_threads_changed)
+        self.local_threads_spin = self.local_inpaint_threads_spin
+        local_inp_layout.addWidget(local_inp_label)
+        local_inp_layout.addWidget(self.local_inpaint_threads_spin)
+        local_threads_layout.addLayout(local_inp_layout)
+
+        pipeline_options_layout.addWidget(local_threads_row)
+
         module_actions = QWidget()
         module_actions.setObjectName('ConfigInlineRow')
         module_actions.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -1402,6 +1513,34 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
     def on_package_auto_install_changed(self):
         pcfg.package_manager.auto_install_missing_packages = self.package_auto_install_checker.isChecked()
 
+    def on_llm_translate_threads_changed(self, val: int):
+        pcfg.module.llm_translate_threads = val
+        pcfg.module.llm_threads = val
+        self.save_config.emit()
+
+    def on_llm_ocr_threads_changed(self, val: int):
+        pcfg.module.llm_ocr_threads = val
+        self.save_config.emit()
+
+    def on_llm_request_delay_changed(self, val: float):
+        pcfg.module.llm_request_delay = val
+        self.save_config.emit()
+
+    def on_local_detect_threads_changed(self, val: int):
+        pcfg.module.local_detect_threads = val
+        self.save_config.emit()
+
+    def on_local_inpaint_threads_changed(self, val: int):
+        pcfg.module.local_inpaint_threads = val
+        pcfg.module.local_threads = val
+        self.save_config.emit()
+
+    def on_llm_threads_changed(self, val: int):
+        self.on_llm_translate_threads_changed(val)
+
+    def on_local_threads_changed(self, val: int):
+        self.on_local_inpaint_threads_changed(val)
+
     def refreshTorchStatus(self) -> None:
         version, device = probe_torch_package()
         if version is not None:
@@ -1871,6 +2010,11 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         self.rst_imgquality_edit.setText(str(pcfg.imgsave_quality))
         self.empty_runcache_checker.setChecked(pcfg.module.empty_runcache)
         self.package_auto_install_checker.setChecked(pcfg.package_manager.auto_install_missing_packages)
+        self.llm_translate_threads_spin.setValue(getattr(pcfg.module, 'llm_translate_threads', getattr(pcfg.module, 'llm_threads', 4)))
+        self.llm_ocr_threads_spin.setValue(getattr(pcfg.module, 'llm_ocr_threads', 2))
+        self.llm_delay_spin.setValue(getattr(pcfg.module, 'llm_request_delay', 0.0))
+        self.local_detect_threads_spin.setValue(getattr(pcfg.module, 'local_detect_threads', 1))
+        self.local_inpaint_threads_spin.setValue(getattr(pcfg.module, 'local_inpaint_threads', getattr(pcfg.module, 'local_threads', 1)))
         self.let_show_only_custom_fonts.setChecked(pcfg.let_show_only_custom_fonts_flag)
 
         self.blockSignals(False)

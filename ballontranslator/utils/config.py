@@ -117,6 +117,13 @@ class ModuleConfig(Config):
     llm_translate_vision: bool = False
     llm_translate_summary_memory: bool = False
     llm_translate_overwrite_summary: bool = False
+    local_threads: int = 1
+    llm_threads: int = 4
+    llm_translate_threads: int = 4
+    llm_ocr_threads: int = 2
+    llm_request_delay: float = 0.0
+    local_detect_threads: int = 1
+    local_inpaint_threads: int = 1
 
     check_need_inpaint: bool = True
     empty_runcache: bool = False
@@ -236,6 +243,32 @@ class ModuleConfig(Config):
             self.ocr_llm_id = self.llm_profiles[0].id
         if (not self.inpaint_llm_id or not profile_by_id(self.llm_profiles, self.inpaint_llm_id)) and self.llm_profiles:
             self.inpaint_llm_id = self.llm_profiles[0].id
+        try:
+            self.llm_translate_threads = max(1, min(16, int(getattr(self, 'llm_translate_threads', getattr(self, 'llm_threads', 4)))))
+        except Exception:
+            self.llm_translate_threads = 4
+        self.llm_threads = self.llm_translate_threads
+
+        try:
+            self.llm_ocr_threads = max(1, min(16, int(getattr(self, 'llm_ocr_threads', 2))))
+        except Exception:
+            self.llm_ocr_threads = 2
+
+        try:
+            self.llm_request_delay = max(0.0, min(60.0, float(getattr(self, 'llm_request_delay', 0.0))))
+        except Exception:
+            self.llm_request_delay = 0.0
+
+        try:
+            self.local_detect_threads = max(1, min(4, int(getattr(self, 'local_detect_threads', getattr(self, 'local_threads', 1)))))
+        except Exception:
+            self.local_detect_threads = 1
+
+        try:
+            self.local_inpaint_threads = max(1, min(4, int(getattr(self, 'local_inpaint_threads', getattr(self, 'local_threads', 1)))))
+        except Exception:
+            self.local_inpaint_threads = 1
+        self.local_threads = self.local_inpaint_threads
         self.update_finish_code()
 
     def update_finish_code(self):

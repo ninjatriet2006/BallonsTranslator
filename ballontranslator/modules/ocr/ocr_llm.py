@@ -111,6 +111,11 @@ class LLMOCR(LLMChatRequester, OCRBase):
             "display_name": "Retry Timeout",
             "description": "Delay between retries in seconds.",
         },
+        "request timeout": {
+            "value": 180.0,
+            "display_name": "Request Timeout",
+            "description": "HTTP request timeout in seconds.",
+        },
         "proxy": {
             "value": "",
             "display_name": "Proxy",

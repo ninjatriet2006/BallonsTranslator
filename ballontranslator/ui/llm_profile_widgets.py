@@ -60,6 +60,9 @@ from ballontranslator.utils.llm_profiles import (
 PROFILE_COMMON_PARAM_DEFS = [
     ('require_api_key', 'checkbox'),
     ('base_url', 'line_editor'),
+    ('concurrency', 'line_editor'),
+    ('request_delay', 'line_editor'),
+    ('rpm_limit', 'line_editor'),
     ('max_tokens', 'line_editor'),
     ('temperature', 'line_editor'),
     ('top_p', 'line_editor'),
@@ -390,6 +393,9 @@ class ProfileCardWidget(QGroupBox):
             'image_model': self.tr('Image Model'),
             'vision_detail_level': self.tr('Vision Detail Level'),
             'thinking_level': self.tr('Thinking Level'),
+            'concurrency': self.tr('Concurrency Override'),
+            'request_delay': self.tr('Request Delay (s)'),
+            'rpm_limit': self.tr('RPM Limit'),
             'max_tokens': self.tr('Max Tokens'),
             'temperature': self.tr('Temperature'),
             'top_p': self.tr('Top P'),
@@ -415,6 +421,9 @@ class ProfileCardWidget(QGroupBox):
             'prompt': self.tr('Additional translation instructions for style and wording.'),
             'vision_prompt': self.tr('Instructions sent to the vision model for OCR.'),
             'image_prompt': self.tr('Instructions sent to the image model for cleanup.'),
+            'concurrency': self.tr('Maximum concurrent worker threads for this profile (0 = follow global settings, 1-16 to override).'),
+            'request_delay': self.tr('Minimum cooldown delay in seconds between requests for this profile (0 = follow global settings).'),
+            'rpm_limit': self.tr('Maximum requests per minute allowed for this profile (0 = unlimited / follow global settings).'),
             'max_tokens': self.tr('Maximum generated response tokens, not input/context tokens.'),
             'temperature': self.tr('Sampling temperature.'),
             'top_p': self.tr('Top-p sampling.'),
@@ -727,6 +736,16 @@ class ProfileCardWidget(QGroupBox):
                 editor.blockSignals(True)
                 editor.setPlainText(str(getattr(self.profile, key) or ''))
                 editor.blockSignals(False)
+        for key, widget_type in PROFILE_COMMON_PARAM_DEFS:
+            widget = self.details.param_widgets.get(key)
+            if isinstance(widget, QLineEdit):
+                widget.blockSignals(True)
+                widget.setText(str(getattr(self.profile, key, '') if getattr(self.profile, key, None) is not None else ''))
+                widget.blockSignals(False)
+            elif isinstance(widget, QCheckBox):
+                widget.blockSignals(True)
+                widget.setChecked(bool(getattr(self.profile, key, False)))
+                widget.blockSignals(False)
         self.refreshTextBadge()
         self.refreshVisionBadge()
         self.refreshImageBadge()

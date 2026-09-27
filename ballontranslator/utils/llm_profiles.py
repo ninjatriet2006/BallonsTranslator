@@ -209,6 +209,9 @@ class LLMProfile(Config):
     presence_penalty: float = 0.0
     json_schema_response_format: bool = False
     low_vram_mode: bool = False
+    concurrency: int = 0
+    request_delay: float = 0.0
+    rpm_limit: int = 0
 
     @classmethod
     def from_provider(cls, provider: str) -> "LLMProfile":
@@ -281,6 +284,19 @@ def _normalize_profile_thinking(profile: LLMProfile) -> LLMProfile:
     if profile.thinking_level not in normalized_options:
         normalized_options.append(profile.thinking_level)
     profile.thinking_level_options = normalized_options
+
+    try:
+        profile.concurrency = max(0, min(16, int(getattr(profile, 'concurrency', 0) or 0)))
+    except Exception:
+        profile.concurrency = 0
+    try:
+        profile.request_delay = max(0.0, min(60.0, float(getattr(profile, 'request_delay', 0.0) or 0.0)))
+    except Exception:
+        profile.request_delay = 0.0
+    try:
+        profile.rpm_limit = max(0, int(getattr(profile, 'rpm_limit', 0) or 0))
+    except Exception:
+        profile.rpm_limit = 0
     return profile
 
 

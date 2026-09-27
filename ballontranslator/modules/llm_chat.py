@@ -23,6 +23,7 @@ from ballontranslator.utils.llm_profiles import (
     normalize_thinking_level,
     resolve_api_key,
 )
+from ballontranslator.utils.config import pcfg
 
 
 OPENAI_MAX_TOKENS_MODELS = frozenset({
@@ -187,6 +188,7 @@ class LLMChatRequester:
         self.last_request_time = 0.0
         self.request_count_minute = 0
         self.minute_start_time = time.time()
+        self._rate_lock = threading.Lock()
         self.stop_event: Optional[threading.Event] = None
 
     def set_stop_event(
@@ -271,31 +273,45 @@ class LLMChatRequester:
         self.client_cache_key = cache_key
         return self.client
 
-    def _respect_delay(self) -> None:
-        current_time = time.time()
-        rpm = self.get_param_value('max requests per minute')
-        delay = self.get_param_value('delay')
-        if rpm > 0:
-            if current_time - self.minute_start_time >= 60:
-                self.request_count_minute = 0
-                self.minute_start_time = current_time
-            if self.request_count_minute >= rpm:
-                wait_time = 60.1 - (current_time - self.minute_start_time)
-                if wait_time > 0:
-                    self.logger.warning(
-                        f'Global RPM limit ({rpm}) reached. Waiting '
-                        f'{wait_time:.2f} seconds.'
-                    )
-                    self._wait(wait_time)
-                self.request_count_minute = 0
-                self.minute_start_time = time.time()
+    def _respect_delay(self, profile: Optional[LLMProfile] = None) -> None:
+        with self._rate_lock:
+            current_time = time.time()
+            profile_rpm = getattr(profile, 'rpm_limit', 0) if profile else 0
+            if profile_rpm > 0:
+                rpm = profile_rpm
+            else:
+                rpm = self.get_param_value('max requests per minute')
 
-        time_since_last_request = current_time - self.last_request_time
-        if time_since_last_request < delay:
-            self._wait(delay - time_since_last_request)
+            profile_delay = getattr(profile, 'request_delay', 0.0) if profile else 0.0
+            global_delay = getattr(pcfg.module, 'llm_request_delay', 0.0)
+            if profile_delay > 0:
+                delay = profile_delay
+            elif global_delay > 0:
+                delay = global_delay
+            else:
+                delay = self.get_param_value('delay')
 
-        self.last_request_time = time.time()
-        self.request_count_minute += 1
+            if rpm > 0:
+                if current_time - self.minute_start_time >= 60:
+                    self.request_count_minute = 0
+                    self.minute_start_time = current_time
+                if self.request_count_minute >= rpm:
+                    wait_time = 60.1 - (current_time - self.minute_start_time)
+                    if wait_time > 0:
+                        self.logger.warning(
+                            f'RPM limit ({rpm}) reached. Waiting '
+                            f'{wait_time:.2f} seconds.'
+                        )
+                        self._wait(wait_time)
+                    self.request_count_minute = 0
+                    self.minute_start_time = time.time()
+
+            time_since_last_request = current_time - self.last_request_time
+            if time_since_last_request < delay:
+                self._wait(delay - time_since_last_request)
+
+            self.last_request_time = time.time()
+            self.request_count_minute += 1
 
     def request_chat_completion(
         self,
@@ -307,12 +323,20 @@ class LLMChatRequester:
             raise LLMRequestStopped()
         openai = self._openai_module()
         client = self._initialize_client(profile)
-        self._respect_delay()
+        self._respect_delay(profile)
         if self.stop_event is not None and self.stop_event.is_set():
             raise LLMRequestStopped()
         call_args = dict(api_args)
         if 'timeout' not in call_args:
-            call_args['timeout'] = 90.0
+            configured_timeout = None
+            if hasattr(self, 'get_param_value'):
+                try:
+                    val = self.get_param_value('request timeout')
+                    if val is not None:
+                        configured_timeout = float(val)
+                except Exception:
+                    pass
+            call_args['timeout'] = configured_timeout if (configured_timeout and configured_timeout > 0) else 180.0
         try:
             completion = client.chat.completions.create(**call_args)
         except getattr(openai, 'AuthenticationError') as error:
