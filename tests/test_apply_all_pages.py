@@ -166,8 +166,77 @@ class TestApplyAllPages(unittest.TestCase):
 
         # Verify live item was updated and size preserved
         live_item.set_fontformat.assert_called_once()
-        live_item.setFontSize.assert_called_once_with(20)
+        applied_fmt = live_item.set_fontformat.call_args[0][0]
+        self.assertEqual(applied_fmt.font_size, 20)
+        self.assertEqual(applied_fmt.font_family, "Impact")
         manager.canvas.update.assert_called_once()
+
+    def test_apply_to_all_pages_live_canvas_without_keep_size(self):
+        target_fmt = FontFormat()
+        target_fmt.font_family = "Impact"
+        target_fmt.frgb = (128, 128, 0)
+        target_fmt.font_size = 32
+
+        live_item = mock.MagicMock()
+        live_item.font_size = 20
+
+        manager = self._create_manager(target_fmt, textblk_items=[live_item])
+
+        with mock.patch('ballontranslator.ui.text_engine.editing.manager.QMessageBox') as mock_msgbox_cls:
+            mock_dialog = mock.MagicMock()
+            mock_dialog.exec.return_value = QMessageBox.StandardButton.Ok
+            mock_msgbox_cls.return_value = mock_dialog
+            mock_msgbox_cls.StandardButton = QMessageBox.StandardButton
+            mock_msgbox_cls.Icon = QMessageBox.Icon
+
+            with mock.patch('ballontranslator.ui.text_engine.editing.manager.QCheckBox') as mock_cb_cls:
+                mock_cb = mock.MagicMock()
+                mock_cb.isChecked.return_value = False
+                mock_cb_cls.return_value = mock_cb
+
+                manager.onFormatAllPages(target_fmt)
+
+        live_item.set_fontformat.assert_called_once()
+        applied_fmt = live_item.set_fontformat.call_args[0][0]
+        self.assertEqual(applied_fmt.font_size, 32)
+        self.assertEqual(applied_fmt.font_family, "Impact")
+
+    def test_apply_to_all_pages_with_real_textblkitem(self):
+        from ballontranslator.ui.text_engine.item import TextBlkItem
+
+        real_item = TextBlkItem(blk=self.blk1, idx=0, set_format=True, show_rect=False)
+        self.assertEqual(real_item.font_size, 28)
+
+        # Test setter
+        real_item.font_size = 35
+        self.assertEqual(real_item.font_size, 35)
+        self.assertEqual(self.blk1.font_size, 35)
+        real_item.font_size = 28
+
+        target_fmt = FontFormat()
+        target_fmt.font_family = "Impact"
+        target_fmt.frgb = (0, 255, 0)
+        target_fmt.font_size = 48
+
+        manager = self._create_manager(target_fmt, textblk_items=[real_item])
+
+        with mock.patch('ballontranslator.ui.text_engine.editing.manager.QMessageBox') as mock_msgbox_cls:
+            mock_dialog = mock.MagicMock()
+            mock_dialog.exec.return_value = QMessageBox.StandardButton.Ok
+            mock_msgbox_cls.return_value = mock_dialog
+            mock_msgbox_cls.StandardButton = QMessageBox.StandardButton
+            mock_msgbox_cls.Icon = QMessageBox.Icon
+
+            with mock.patch('ballontranslator.ui.text_engine.editing.manager.QCheckBox') as mock_cb_cls:
+                mock_cb = mock.MagicMock()
+                mock_cb.isChecked.return_value = True
+                mock_cb_cls.return_value = mock_cb
+
+                # Must not raise AttributeError: 'TextBlkItem' object has no attribute 'font_size'
+                manager.onFormatAllPages(target_fmt)
+
+        self.assertEqual(real_item.font_size, 28)
+        self.assertEqual(real_item.fontformat.font_family, "Impact")
 
     def test_fontformat_panel_apply_all_pages_button(self):
         shared.register_view_widget = mock.MagicMock()

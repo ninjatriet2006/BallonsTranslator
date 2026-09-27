@@ -445,8 +445,20 @@ class PageProgressRangeBar(QWidget):
             self.range_changed.emit(self.start_index + 1, self.end_index + 1)
 
 
+class _RangeSpinBoxStub:
+    """Compatibility shim providing .value() for code expecting spinboxes."""
+    def __init__(self, get_val_fn):
+        self._get_val_fn = get_val_fn
+
+    def value(self) -> int:
+        return self._get_val_fn()
+
+    def setValue(self, val: int):
+        pass
+
+
 class PageRangeProgressWidget(QWidget):
-    """Own the page selectors and discontinuous progress-range visualization.
+    """Clean page selection widget using a single multi-range input and visual progress track.
 
     >>> PageRangeProgressWidget.__name__
     'PageRangeProgressWidget'
@@ -462,120 +474,124 @@ class PageRangeProgressWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(4)
 
         range_row = QWidget(self)
         range_row.setObjectName('RunPipelineGeneralSettingRow')
         range_layout = QHBoxLayout(range_row)
         range_layout.setContentsMargins(2, 0, 2, 0)
         range_layout.setSpacing(6)
+
         range_label = QLabel(self.tr('Pages to Run'), range_row)
         range_label.setObjectName('RunPipelineSettingLabel')
         range_label.setFixedWidth(80)
         range_layout.addWidget(range_label)
 
-        self.range_start = PageRangeSpinBox(range_row)
-        self.range_start.setObjectName('RunPipelineRangeStart')
-        self.range_end = PageRangeSpinBox(range_row)
-        self.range_end.setObjectName('RunPipelineRangeEnd')
-        page_count = len(self.page_names)
-        maximum = max(1, page_count)
-        saved_end = maximum if end is None else end
-        start = max(1, min(int(start), maximum))
-        saved_end = max(start, min(int(saved_end), maximum))
-        for selector in (self.range_start, self.range_end):
-            selector.setRange(1, maximum)
-            selector.setEnabled(page_count > 0)
-            selector.setFixedWidth(68)
-        self.range_start.setValue(start)
-        self.range_end.setValue(saved_end)
-        range_layout.addWidget(self.range_start)
-        range_layout.addWidget(QLabel('-', range_row))
-        range_layout.addWidget(self.range_end)
+        self.custom_range_input = QLineEdit(range_row)
+        self.custom_range_input.setObjectName('RunPipelineCustomRangeInput')
+        self.custom_range_input.setPlaceholderText(self.tr('e.g. 1-5, 8, 12-15 (Leave empty for All)'))
+        range_layout.addWidget(self.custom_range_input, 1)
 
-        self.btn_current = QPushButton(self.tr('Current'), range_row)
-        self.btn_current.setObjectName('RunPipelineQuickButton')
-        self.btn_current.setToolTip(self.tr('Select current page only'))
-        self.btn_current.setEnabled(page_count > 0 and self.current_page is not None)
-        self.btn_current.clicked.connect(self._select_current_page)
-        range_layout.addWidget(self.btn_current)
-
-        self.btn_all = QPushButton(self.tr('All'), range_row)
-        self.btn_all.setObjectName('RunPipelineQuickButton')
-        self.btn_all.setToolTip(self.tr('Select all pages'))
-        self.btn_all.setEnabled(page_count > 0)
-        self.btn_all.clicked.connect(self._select_all_pages)
-        range_layout.addWidget(self.btn_all)
-
-        range_layout.addStretch(1)
         self.progress_label = QLabel(range_row)
         self.progress_label.setObjectName('RunPipelineSettingLabel')
         self.progress_label.setTextFormat(Qt.TextFormat.RichText)
         range_layout.addWidget(self.progress_label)
         layout.addWidget(range_row)
 
-        custom_row = QWidget(self)
-        custom_row.setObjectName('RunPipelineGeneralSettingRow')
-        custom_layout = QHBoxLayout(custom_row)
-        custom_layout.setContentsMargins(2, 0, 2, 0)
-        custom_layout.setSpacing(6)
-        custom_label = QLabel(self.tr('Multi-range'), custom_row)
-        custom_label.setObjectName('RunPipelineSettingLabel')
-        custom_label.setFixedWidth(80)
-        custom_layout.addWidget(custom_label)
-
-        self.custom_range_input = QLineEdit(custom_row)
-        self.custom_range_input.setObjectName('RunPipelineCustomRangeInput')
-        self.custom_range_input.setPlaceholderText(self.tr('e.g. 1-5, 8, 12-15 (optional)'))
-        custom_layout.addWidget(self.custom_range_input)
-        layout.addWidget(custom_row)
-
         self.range_bar = PageProgressRangeBar(self.page_names, self)
+        page_count = len(self.page_names)
+        maximum = max(1, page_count)
+        saved_end = maximum if end is None else end
+        start = max(1, min(int(start), maximum))
+        saved_end = max(start, min(int(saved_end), maximum))
+
+        # Default is empty (meaning All pages).
+        # Only populate if a specific sub-range was requested
+        if start != 1 or saved_end != maximum:
+            if start == saved_end:
+                self.custom_range_input.setText(str(start))
+            else:
+                self.custom_range_input.setText(f"{start}-{saved_end}")
+
         self.range_bar.set_range(start, saved_end, emit=False)
         self._update_progress_label()
         layout.addWidget(self.range_bar)
 
-        self.range_start.valueChanged.connect(self._on_start_changed)
-        self.range_end.valueChanged.connect(self._on_end_changed)
         self.range_bar.range_changed.connect(self._on_bar_range_changed)
         self.custom_range_input.textChanged.connect(self._on_custom_range_changed)
 
-    def _select_current_page(self):
-        target = self.current_page if self.current_page is not None else 1
-        target = max(1, min(int(target), max(1, len(self.page_names))))
-        self.custom_range_input.clear()
-        self.set_range(target, target)
+    @property
+    def range_start(self):
+        return _RangeSpinBoxStub(lambda: self.range_bar.start_index + 1)
 
-    def _select_all_pages(self):
-        self.custom_range_input.clear()
-        self.set_range(1, max(1, len(self.page_names)))
+    @property
+    def range_end(self):
+        return _RangeSpinBoxStub(lambda: self.range_bar.end_index + 1)
 
     def _on_custom_range_changed(self, text: str):
+        text = text.strip()
+        page_count = len(self.page_names)
+        if not text:
+            self.range_bar.set_range(1, max(1, page_count), emit=False)
+            self._update_progress_label()
+            self.range_changed.emit(1, max(1, page_count))
+            return
+
+        parsed = parse_page_ranges(text, max_pages=page_count)
+        if parsed:
+            min_p = min(parsed)
+            max_p = max(parsed)
+            self.range_bar.set_range(min_p, max_p, emit=False)
+            self.range_changed.emit(min_p, max_p)
         self._update_progress_label()
 
+    def _on_bar_range_changed(self, start: int, end: int):
+        page_count = len(self.page_names)
+        self.custom_range_input.blockSignals(True)
+        if start == 1 and end == page_count:
+            self.custom_range_input.clear()
+        elif start == end:
+            self.custom_range_input.setText(str(start))
+        else:
+            self.custom_range_input.setText(f"{start}-{end}")
+        self.custom_range_input.blockSignals(False)
+        self._update_progress_label()
+        self.range_changed.emit(start, end)
+
     def get_selected_pages(self):
-        text = self.custom_range_input.text().strip()
-        if text and len(self.page_names) > 0:
-            parsed = parse_page_ranges(text, max_pages=len(self.page_names))
-            if parsed:
-                return [self.page_names[p - 1] for p in parsed if 1 <= p <= len(self.page_names)]
         if not self.page_names:
             return []
-        start = max(1, min(self.range_start.value(), len(self.page_names)))
-        end = max(start, min(self.range_end.value(), len(self.page_names)))
-        return self.page_names[start - 1 : end]
+        text = self.custom_range_input.text().strip()
+        if not text:
+            return list(self.page_names)
+        parsed = parse_page_ranges(text, max_pages=len(self.page_names))
+        if parsed:
+            return [self.page_names[p - 1] for p in parsed if 1 <= p <= len(self.page_names)]
+        return list(self.page_names)
 
     def get_selected_page_indices(self):
-        text = self.custom_range_input.text().strip()
-        if text and len(self.page_names) > 0:
-            parsed = parse_page_ranges(text, max_pages=len(self.page_names))
-            if parsed:
-                return [p - 1 for p in parsed if 1 <= p <= len(self.page_names)]
         if not self.page_names:
             return []
-        start = max(1, min(self.range_start.value(), len(self.page_names)))
-        end = max(start, min(self.range_end.value(), len(self.page_names)))
-        return list(range(start - 1, end))
+        text = self.custom_range_input.text().strip()
+        if not text:
+            return list(range(len(self.page_names)))
+        parsed = parse_page_ranges(text, max_pages=len(self.page_names))
+        if parsed:
+            return [p - 1 for p in parsed if 1 <= p <= len(self.page_names)]
+        return list(range(len(self.page_names)))
+
+    def set_range(self, start: int, end: int):
+        page_count = len(self.page_names)
+        self.custom_range_input.blockSignals(True)
+        if start <= 1 and end >= page_count:
+            self.custom_range_input.clear()
+        elif start == end:
+            self.custom_range_input.setText(str(start))
+        else:
+            self.custom_range_input.setText(f"{start}-{end}")
+        self.custom_range_input.blockSignals(False)
+        self.range_bar.set_range(start, end, emit=False)
+        self._update_progress_label()
 
     def set_finished_pages(self, finished_pages):
         self.range_bar.set_finished_pages(finished_pages)
@@ -583,7 +599,7 @@ class PageRangeProgressWidget(QWidget):
 
     def _update_progress_label(self):
         finished_count = self.range_bar.finished_count
-        text = getattr(self, 'custom_range_input', None) and self.custom_range_input.text().strip()
+        text = self.custom_range_input.text().strip() if hasattr(self, 'custom_range_input') else ''
         if text and len(self.page_names) > 0:
             parsed = parse_page_ranges(text, max_pages=len(self.page_names))
             sel_count = len(parsed)
@@ -597,33 +613,3 @@ class PageRangeProgressWidget(QWidget):
             f'/{self.range_bar.page_count}'
             f'{sel_str}'
         )
-
-    def set_range(self, start: int, end: int):
-        self.range_bar.set_range(start, end)
-
-    def _on_start_changed(self, value: int):
-        if value > self.range_end.value():
-            blocker = QSignalBlocker(self.range_end)
-            self.range_end.setValue(value)
-            del blocker
-        self.range_bar.set_range(value, self.range_end.value(), emit=False)
-        self._update_progress_label()
-        self.range_changed.emit(value, self.range_end.value())
-
-    def _on_end_changed(self, value: int):
-        if value < self.range_start.value():
-            blocker = QSignalBlocker(self.range_start)
-            self.range_start.setValue(value)
-            del blocker
-        self.range_bar.set_range(self.range_start.value(), value, emit=False)
-        self._update_progress_label()
-        self.range_changed.emit(self.range_start.value(), value)
-
-    def _on_bar_range_changed(self, start: int, end: int):
-        start_blocker = QSignalBlocker(self.range_start)
-        end_blocker = QSignalBlocker(self.range_end)
-        self.range_start.setValue(start)
-        self.range_end.setValue(end)
-        del start_blocker, end_blocker
-        self._update_progress_label()
-        self.range_changed.emit(start, end)

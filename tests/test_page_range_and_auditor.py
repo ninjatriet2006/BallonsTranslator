@@ -45,26 +45,16 @@ class PageRangeAndAuditorTests(unittest.TestCase):
         self.assertTrue(is_safety_refusal_error("Request was refused by content policy"))
         self.assertFalse(is_safety_refusal_error("Connection timed out after 30 seconds"))
 
-    def test_page_range_progress_widget_quick_buttons_and_selection(self):
+    def test_page_range_progress_widget_input_and_selection(self):
         page_names = [f"page_{i:03d}.png" for i in range(1, 210)]  # 209 pages
         widget = PageRangeProgressWidget(page_names, start=1, end=209, current_page=199)
 
-        # Initial range is 1-209
+        # Default text is empty, meaning ALL pages
+        self.assertEqual(widget.custom_range_input.text(), "")
         self.assertEqual(widget.range_start.value(), 1)
         self.assertEqual(widget.range_end.value(), 209)
         self.assertEqual(len(widget.get_selected_pages()), 209)
-
-        # Test [Current] button: click should set 199 - 199
-        widget.btn_current.click()
-        self.assertEqual(widget.range_start.value(), 199)
-        self.assertEqual(widget.range_end.value(), 199)
-        self.assertEqual(widget.get_selected_pages(), ["page_199.png"])
-
-        # Test [All] button: click should set 1 - 209
-        widget.btn_all.click()
-        self.assertEqual(widget.range_start.value(), 1)
-        self.assertEqual(widget.range_end.value(), 209)
-        self.assertEqual(len(widget.get_selected_pages()), 209)
+        self.assertEqual(len(widget.get_selected_page_indices()), 209)
 
         # Test Multi-range custom input
         widget.custom_range_input.setText("1-3, 5, 199")
@@ -72,9 +62,30 @@ class PageRangeAndAuditorTests(unittest.TestCase):
             widget.get_selected_pages(),
             ["page_001.png", "page_002.png", "page_003.png", "page_005.png", "page_199.png"],
         )
+        self.assertEqual(widget.get_selected_page_indices(), [0, 1, 2, 4, 198])
+        self.assertEqual(widget.range_start.value(), 1)
+        self.assertEqual(widget.range_end.value(), 199)
 
-        # Clear custom input falls back to range spinboxes
+        # Clear custom input defaults back to All pages
         widget.custom_range_input.clear()
+        self.assertEqual(len(widget.get_selected_pages()), 209)
+        self.assertEqual(widget.range_start.value(), 1)
+        self.assertEqual(widget.range_end.value(), 209)
+
+        # Single page input
+        widget.custom_range_input.setText("199")
+        self.assertEqual(widget.get_selected_pages(), ["page_199.png"])
+        self.assertEqual(widget.range_start.value(), 199)
+        self.assertEqual(widget.range_end.value(), 199)
+
+        # Range bar sync
+        widget.set_range(10, 20)
+        self.assertEqual(widget.custom_range_input.text(), "10-20")
+        self.assertEqual(len(widget.get_selected_pages()), 11)
+
+        # Full range resets to empty (All)
+        widget.set_range(1, 209)
+        self.assertEqual(widget.custom_range_input.text(), "")
         self.assertEqual(len(widget.get_selected_pages()), 209)
 
     def test_pipeline_error_dialog_and_retry(self):

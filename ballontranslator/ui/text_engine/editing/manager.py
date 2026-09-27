@@ -871,10 +871,14 @@ class SceneTextManager(QObject):
                         blk._detected_font_size = old_det_size
 
             for item in self.textblk_item_list:
-                old_size = item.font_size
-                item.set_fontformat(portable_format, set_char_format=True)
-                if keep_size and old_size > 0:
-                    item.setFontSize(old_size)
+                item_format = portable_format.deepcopy()
+                if keep_size:
+                    old_size = getattr(item, 'font_size', 0)
+                    if old_size <= 0 and getattr(item, 'blk', None) is not None:
+                        old_size = getattr(item.blk, 'font_size', 0)
+                    if old_size > 0:
+                        item_format.font_size = old_size
+                item.set_fontformat(item_format, set_char_format=True)
 
             self.formatpanel.set_active_format(portable_format)
             if hasattr(self.canvas, 'update'):

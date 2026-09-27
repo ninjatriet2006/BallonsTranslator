@@ -1,5 +1,4 @@
 import os
-
 from qtpy.QtCore import (
     QEvent,
     QObject,
@@ -468,54 +467,80 @@ class RunPipelineDialog(QDialog):
     def _save_config_on_finish(self, _result: int) -> None:
         save_config()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        app = QApplication.instance()
-        if app is not None and not self._app_event_filter_installed:
-            app.installEventFilter(self)
-            self._app_event_filter_installed = True
-
-    def hideEvent(self, event):
-        app = QApplication.instance()
-        if app is not None and self._app_event_filter_installed:
-            app.removeEventFilter(self)
+    def _uninstall_app_event_filter(self) -> None:
+        if getattr(self, '_app_event_filter_installed', False):
+            app = QApplication.instance()
+            if app is not None:
+                try:
+                    app.removeEventFilter(self)
+                except Exception:
+                    pass
             self._app_event_filter_installed = False
+
+    def done(self, r: int) -> None:
+        self._uninstall_app_event_filter()
+        super().done(r)
+
+    def reject(self) -> None:
+        self._uninstall_app_event_filter()
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        self._uninstall_app_event_filter()
+        super().closeEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self._uninstall_app_event_filter()
         super().hideEvent(event)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        app = QApplication.instance()
+        if app is not None and not getattr(self, '_app_event_filter_installed', False):
+            try:
+                app.installEventFilter(self)
+                self._app_event_filter_installed = True
+            except Exception:
+                pass
+
     def eventFilter(self, watched, event):
-        if (
-            watched is getattr(self, 'glossary_path_edit', None)
-            and isinstance(event, QMouseEvent)
-            and event.type() == QEvent.Type.MouseButtonPress
-            and event.button() == Qt.MouseButton.LeftButton
-            and not pcfg.module.llm_glossary_path.strip()
-        ):
-            self._select_glossary_file()
-            return True
-        if (
-            not self.isVisible()
-            or not isinstance(watched, QWidget)
-            or watched.window() is not self
-            or not isinstance(event, QMouseEvent)
-        ):
-            return super().eventFilter(watched, event)
-
-        event_type = event.type()
-        if event_type not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove):
-            return super().eventFilter(watched, event)
-
-        global_pos = self._global_mouse_pos(event)
-        edges = self._resize_edges(global_pos)
-        if event_type == QEvent.Type.MouseMove:
-            self._update_resize_cursor(edges)
-        elif event.button() == Qt.MouseButton.LeftButton:
-            if edges:
-                FramelessMoveResize.starSystemResize(self, global_pos, edges)
+        if not getattr(self, '_app_event_filter_installed', False) or not self.isVisible():
+            return False
+        try:
+            if (
+                watched is getattr(self, 'glossary_path_edit', None)
+                and isinstance(event, QMouseEvent)
+                and event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+                and not pcfg.module.llm_glossary_path.strip()
+            ):
+                self._select_glossary_file()
                 return True
-            if self._can_drag_title(watched, global_pos):
-                FramelessMoveResize.startSystemMove(self, global_pos)
-                return True
-        return super().eventFilter(watched, event)
+            if (
+                not isinstance(watched, QWidget)
+                or watched.window() is not self
+                or not isinstance(event, QMouseEvent)
+            ):
+                return False
+
+            event_type = event.type()
+            if event_type not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove):
+                return False
+
+            global_pos = self._global_mouse_pos(event)
+            edges = self._resize_edges(global_pos)
+            if event_type == QEvent.Type.MouseMove:
+                self._update_resize_cursor(edges)
+            elif event.button() == Qt.MouseButton.LeftButton:
+                if edges:
+                    FramelessMoveResize.starSystemResize(self, global_pos, edges)
+                    return True
+                if self._can_drag_title(watched, global_pos):
+                    FramelessMoveResize.startSystemMove(self, global_pos)
+                    return True
+            return False
+        except Exception:
+            return False
 
     @staticmethod
     def _global_mouse_pos(event: QMouseEvent):

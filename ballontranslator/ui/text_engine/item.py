@@ -1360,6 +1360,27 @@ class TextBlkItem(QGraphicsTextItem):
             min_font_size = pt2px(min_font_size)
         return min_font_size
 
+    @property
+    def font_size(self) -> float:
+        if self.fontformat is not None and self.fontformat.font_size > 0:
+            return self.fontformat.font_size
+        if self.blk is not None and self.blk.font_size > 0:
+            return self.blk.font_size
+        try:
+            sz = self.minFontSize(to_px=True)
+            if sz > 0:
+                return sz
+        except Exception:
+            pass
+        return 0.0
+
+    @font_size.setter
+    def font_size(self, value: float):
+        if self.fontformat is not None:
+            self.fontformat.font_size = value
+        if self.blk is not None:
+            self.blk.font_size = value
+
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         self._vertical_navigation_y = None
         if not self.isEditing():

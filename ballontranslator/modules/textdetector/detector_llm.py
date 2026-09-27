@@ -241,39 +241,55 @@ def _parse_box_coordinates(
 
 def extract_stroke_mask(roi: np.ndarray) -> np.ndarray:
     """Extract fine text stroke mask inside a bounding box to avoid wiping background artwork."""
-    if roi.size == 0 or roi.shape[0] < 2 or roi.shape[1] < 2:
-        return np.full((max(1, roi.shape[0]), max(1, roi.shape[1])), 255, dtype=np.uint8)
+    if roi is None or roi.size == 0 or roi.shape[0] < 2 or roi.shape[1] < 2:
+        h = 1 if roi is None or roi.shape[0] < 1 else roi.shape[0]
+        w = 1 if roi is None or roi.shape[1] < 1 else roi.shape[1]
+        return np.full((h, w), 255, dtype=np.uint8)
 
-    if roi.ndim == 3:
-        if roi.shape[2] == 4:
-            gray = cv2.cvtColor(roi, cv2.COLOR_RGBA2GRAY)
+    try:
+        roi = np.ascontiguousarray(roi)
+        if roi.dtype != np.uint8:
+            roi = np.clip(roi, 0, 255).astype(np.uint8)
+
+        if roi.ndim == 3:
+            channels = roi.shape[2]
+            if channels == 4:
+                gray = cv2.cvtColor(roi, cv2.COLOR_RGBA2GRAY)
+            elif channels == 3:
+                gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+            elif channels == 1:
+                gray = roi[:, :, 0]
+            else:
+                gray = cv2.cvtColor(roi[:, :, :3], cv2.COLOR_RGB2GRAY)
+        elif roi.ndim == 2:
+            gray = roi
         else:
-            gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = roi
+            return np.full((roi.shape[0], roi.shape[1]), 255, dtype=np.uint8)
 
-    border = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
-    bg_median = float(np.median(border))
-    bg_is_light = bg_median > 127.0
+        border = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
+        bg_median = float(np.median(border))
+        bg_is_light = bg_median > 127.0
 
-    thresh_type = cv2.THRESH_BINARY_INV if bg_is_light else cv2.THRESH_BINARY
-    _, otsu_mask = cv2.threshold(gray, 0, 255, thresh_type + cv2.THRESH_OTSU)
+        thresh_type = cv2.THRESH_BINARY_INV if bg_is_light else cv2.THRESH_BINARY
+        _, otsu_mask = cv2.threshold(gray, 0, 255, thresh_type + cv2.THRESH_OTSU)
 
-    total_pixels = gray.shape[0] * gray.shape[1]
-    fg_ratio = np.count_nonzero(otsu_mask) / max(1, total_pixels)
+        total_pixels = gray.shape[0] * gray.shape[1]
+        fg_ratio = np.count_nonzero(otsu_mask) / max(1, total_pixels)
 
-    if 0.03 <= fg_ratio <= 0.65:
-        return otsu_mask
+        if 0.03 <= fg_ratio <= 0.65:
+            return otsu_mask
 
-    ad_mask = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        thresh_type, 15, 8
-    )
-    ad_ratio = np.count_nonzero(ad_mask) / max(1, total_pixels)
-    if 0.03 <= ad_ratio <= 0.70:
-        return ad_mask
+        ad_mask = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            thresh_type, 15, 8
+        )
+        ad_ratio = np.count_nonzero(ad_mask) / max(1, total_pixels)
+        if 0.03 <= ad_ratio <= 0.70:
+            return ad_mask
 
-    return np.full_like(gray, 255)
+        return np.full_like(gray, 255)
+    except Exception:
+        return np.full((roi.shape[0], roi.shape[1]), 255, dtype=np.uint8)
 
 
 def slice_block_into_child_lines(
@@ -673,15 +689,24 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
                         if lx2 - lx1 > 1 and ly2 - ly1 > 1:
                             roi = img[ly1:ly2, lx1:lx2]
                             roi_mask = extract_stroke_mask(roi)
-                            mask[ly1:ly2, lx1:lx2] = np.bitwise_or(mask[ly1:ly2, lx1:lx2], roi_mask)
+                            target_slice = mask[ly1:ly2, lx1:lx2]
+                            if roi_mask.shape == target_slice.shape:
+                                mask[ly1:ly2, lx1:lx2] = np.bitwise_or(target_slice, roi_mask)
+                            else:
+                                mask[ly1:ly2, lx1:lx2] = 255
             else:
                 bx1, by1, bx2, by2 = blk.xyxy
                 if mask_mode == 'bounding_box':
                     mask[by1:by2, bx1:bx2] = 255
                 else:
-                    roi = img[by1:by2, bx1:bx2]
-                    roi_mask = extract_stroke_mask(roi)
-                    mask[by1:by2, bx1:bx2] = np.bitwise_or(mask[by1:by2, bx1:bx2], roi_mask)
+                    if bx2 - bx1 > 1 and by2 - by1 > 1:
+                        roi = img[by1:by2, bx1:bx2]
+                        roi_mask = extract_stroke_mask(roi)
+                        target_slice = mask[by1:by2, bx1:bx2]
+                        if roi_mask.shape == target_slice.shape:
+                            mask[by1:by2, bx1:bx2] = np.bitwise_or(target_slice, roi_mask)
+                        else:
+                            mask[by1:by2, bx1:bx2] = 255
 
         dilate_size = int(self.get_param_value('mask dilate size'))
         if dilate_size > 0:

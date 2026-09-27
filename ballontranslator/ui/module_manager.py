@@ -1600,13 +1600,6 @@ class ModuleManager(QObject):
         self._pending_canvas_inpaint: Optional[dict] = None
         self._canvas_inpaint_source: Optional[np.ndarray] = None
 
-    @property
-    def pipeline_issues(self) -> List[StageIssue]:
-        return list(self._pipeline_issues)
-
-    def clear_pipeline_issues(self):
-        self._pipeline_issues.clear()
-        self.pipeline_issues_updated.emit(0)
         self.check_inpaint_fin_timer = QTimer(self)
         self.check_inpaint_fin_timer.timeout.connect(self.check_inpaint_th_finished)
         self.prepare_msgbox: ProgressMessageBox = None
@@ -1621,6 +1614,14 @@ class ModuleManager(QObject):
         self.package_install_thread: PackageInstallThread = None
         self.config_panel: ConfigPanel = None
         self.parent_widget = None
+
+    @property
+    def pipeline_issues(self) -> List[StageIssue]:
+        return list(self._pipeline_issues)
+
+    def clear_pipeline_issues(self):
+        self._pipeline_issues.clear()
+        self.pipeline_issues_updated.emit(0)
 
     def setupThread(
         self,
