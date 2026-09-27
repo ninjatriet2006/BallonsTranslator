@@ -24,6 +24,7 @@ from ballontranslator.utils.structures import Config, field, nested_dataclass
 LLM_TRANSLATOR_KEY = "LLMTranslator"
 LLM_OCR_KEY = "LLMOCR"
 LLM_INPAINT_KEY = "LLMInpaint"
+LLM_DETECTOR_KEY = "llm_detector"
 OLD_LLM_TRANSLATORS = ("ChatGPT", "ChatGPT_exp", "LLM_API_Translator")
 
 THINKING_AUTO = "Auto"

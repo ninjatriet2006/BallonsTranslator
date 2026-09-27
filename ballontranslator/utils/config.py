@@ -106,6 +106,7 @@ class ModuleConfig(Config):
     translator_llm_id: str = ''
     ocr_llm_id: str = ''
     inpaint_llm_id: str = ''
+    detector_llm_id: str = ''
     inpainter_params: Dict = field(default_factory=lambda: dict())
     translate_source: str = '日本語'
     translate_target: str = '简体中文'

@@ -44,7 +44,7 @@ from .custom_widget import ImgtransProgressMessageBox, ParamComboBox, ProgressMe
 from .configpanel import ConfigPanel
 from ballontranslator.utils.proj_imgtrans import ProjImgTrans
 from ballontranslator.utils.config import pcfg, RunStatus, save_config, LLMTranslateContext
-from ballontranslator.utils.llm_profiles import LLM_INPAINT_KEY, LLM_OCR_KEY
+from ballontranslator.utils.llm_profiles import LLM_DETECTOR_KEY, LLM_INPAINT_KEY, LLM_OCR_KEY
 from ballontranslator.utils.global_callbacks import register_global_callback
 cfg_module = pcfg.module
 
@@ -1166,9 +1166,25 @@ class ImgtransThread(QThread):
                 # Detection can replace or reorder blocks, so old translations
                 # are never compatible even if detection later fails.
                 self.imgtrans_proj.begin_detection(imgname)
+                if hasattr(self.textdetector, 'set_stop_event'):
+                    self.textdetector.set_stop_event(self.stop_event)
                 try:
                     mask, blk_list = self.textdetector.detect(img, self.imgtrans_proj)
                     need_save_mask = True
+                except LLMUserActionRequiredError as e:
+                    _show_llm_user_action_required_dialog(
+                        e,
+                        self.tr('Text Detection Failed.'),
+                        'TextDetectFailed',
+                        imgname,
+                        self.tr('Page'),
+                    )
+                    self.requestStop()
+                    break
+                except LLMRequestStopped:
+                    LOGGER.info('Text detection stopped by user.')
+                    self.requestStop()
+                    break
                 except ModuleRunError as e:
                     self._stop_on_stage_failure(
                         e,
@@ -1200,20 +1216,27 @@ class ImgtransThread(QThread):
                 if hasattr(self.ocr, 'set_stop_event'):
                     self.ocr.set_stop_event(self.stop_event)
                 try:
-                    # full_page is an LLMOCR-only extension; preserve the
-                    # historical two-argument contract for custom OCR modules.
-                    if getattr(self.ocr, 'name', '') == LLM_OCR_KEY:
-                        ocr_result = self.ocr.run_ocr(
-                            img,
-                            blk_list,
-                            full_page=True,
-                        )
+                    is_llm_detector = getattr(self.textdetector, 'name', '') == LLM_DETECTOR_KEY
+                    already_has_text = bool(blk_list and all(not text_is_empty(b.get_text()) for b in blk_list))
+                    if is_llm_detector and (already_has_text or len(blk_list) == 0):
+                        LOGGER.info("All-in-One LLM Vision: text already recognized during detection; bypassing duplicate OCR stage.")
+                        self.imgtrans_proj.pages[imgname] = blk_list
+                        self.ocr_counter += 1
                     else:
-                        ocr_result = self.ocr.run_ocr(img, blk_list)
-                    if isinstance(ocr_result, list):
-                        blk_list = ocr_result
-                    self.imgtrans_proj.pages[imgname] = blk_list
-                    self.ocr_counter += 1
+                        # full_page is an LLMOCR-only extension; preserve the
+                        # historical two-argument contract for custom OCR modules.
+                        if getattr(self.ocr, 'name', '') == LLM_OCR_KEY:
+                            ocr_result = self.ocr.run_ocr(
+                                img,
+                                blk_list,
+                                full_page=True,
+                            )
+                        else:
+                            ocr_result = self.ocr.run_ocr(img, blk_list)
+                        if isinstance(ocr_result, list):
+                            blk_list = ocr_result
+                        self.imgtrans_proj.pages[imgname] = blk_list
+                        self.ocr_counter += 1
 
                     if pcfg.restore_ocr_empty:
                         blk_list_updated = []
