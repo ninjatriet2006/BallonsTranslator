@@ -170,7 +170,7 @@ class LLMInpaint(LLMImageRequester, InpainterBase):
         profile = self.profile
         profile_concurrency = getattr(profile, 'concurrency', 0) if profile else 0
         workers = profile_concurrency if profile_concurrency > 0 else getattr(pcfg.module, 'llm_inpaint_threads', 2)
-        workers = max(1, min(16, int(workers)))
+        workers = max(1, int(workers))
 
         if not self.inpaint_by_block or not textblock_list or len(textblock_list) <= 1 or workers <= 1:
             return super().inpaint(img, mask, textblock_list, check_need_inpaint)

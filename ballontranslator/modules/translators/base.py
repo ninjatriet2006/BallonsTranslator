@@ -361,10 +361,12 @@ class BaseTranslator(BaseModule):
 
     @property
     def supported_tgt_list(self) -> List[str]:
-        return self.valid_lang_list
+        return [lang for lang in self.valid_lang_list if lang != 'Auto']
 
     @property
     def supported_src_list(self) -> List[str]:
+        if 'Auto' in self.valid_lang_list:
+            return ['Auto'] + [lang for lang in self.valid_lang_list if lang != 'Auto']
         return self.valid_lang_list
         
     def delay(self) -> float:

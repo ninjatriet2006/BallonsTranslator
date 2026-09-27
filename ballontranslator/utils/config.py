@@ -248,18 +248,18 @@ class ModuleConfig(Config):
         if (not self.inpaint_llm_id or not profile_by_id(self.llm_profiles, self.inpaint_llm_id)) and self.llm_profiles:
             self.inpaint_llm_id = self.llm_profiles[0].id
         try:
-            self.llm_translate_threads = max(1, min(16, int(getattr(self, 'llm_translate_threads', getattr(self, 'llm_threads', 4)))))
+            self.llm_translate_threads = max(1, int(getattr(self, 'llm_translate_threads', getattr(self, 'llm_threads', 4))))
         except Exception:
             self.llm_translate_threads = 4
         self.llm_threads = self.llm_translate_threads
 
         try:
-            self.llm_ocr_threads = max(1, min(16, int(getattr(self, 'llm_ocr_threads', 2))))
+            self.llm_ocr_threads = max(1, int(getattr(self, 'llm_ocr_threads', 2)))
         except Exception:
             self.llm_ocr_threads = 2
 
         try:
-            self.llm_inpaint_threads = max(1, min(16, int(getattr(self, 'llm_inpaint_threads', 2))))
+            self.llm_inpaint_threads = max(1, int(getattr(self, 'llm_inpaint_threads', 2)))
         except Exception:
             self.llm_inpaint_threads = 2
 
@@ -269,22 +269,22 @@ class ModuleConfig(Config):
             self.llm_request_delay = 0.0
 
         try:
-            self.local_detect_threads = max(1, min(4, int(getattr(self, 'local_detect_threads', getattr(self, 'local_threads', 1)))))
+            self.local_detect_threads = max(1, int(getattr(self, 'local_detect_threads', getattr(self, 'local_threads', 1))))
         except Exception:
             self.local_detect_threads = 1
 
         try:
-            self.local_ocr_threads = max(1, min(4, int(getattr(self, 'local_ocr_threads', 1))))
+            self.local_ocr_threads = max(1, int(getattr(self, 'local_ocr_threads', 1)))
         except Exception:
             self.local_ocr_threads = 1
 
         try:
-            self.local_translate_threads = max(1, min(4, int(getattr(self, 'local_translate_threads', 1))))
+            self.local_translate_threads = max(1, int(getattr(self, 'local_translate_threads', 1)))
         except Exception:
             self.local_translate_threads = 1
 
         try:
-            self.local_inpaint_threads = max(1, min(4, int(getattr(self, 'local_inpaint_threads', getattr(self, 'local_threads', 1)))))
+            self.local_inpaint_threads = max(1, int(getattr(self, 'local_inpaint_threads', getattr(self, 'local_threads', 1))))
         except Exception:
             self.local_inpaint_threads = 1
         self.local_threads = self.local_inpaint_threads

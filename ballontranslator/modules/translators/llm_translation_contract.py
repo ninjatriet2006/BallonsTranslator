@@ -130,11 +130,18 @@ def render_user_prompt(
         for index, query in enumerate(queries)
     ]
     input_json = json.dumps(input_elements, ensure_ascii=False, indent=2)
-    prompt = (
-        f"Translate the following JSON array from {source_language} "
-        f"to {target_language}.\n\n"
-        f"INPUT:\n{input_json}"
-    )
+    if str(source_language).strip().lower() in ('auto', 'auto detect', 'autodetect'):
+        prompt = (
+            f"Translate the following JSON array (automatically detect the source language) "
+            f"to {target_language}.\n\n"
+            f"INPUT:\n{input_json}"
+        )
+    else:
+        prompt = (
+            f"Translate the following JSON array from {source_language} "
+            f"to {target_language}.\n\n"
+            f"INPUT:\n{input_json}"
+        )
     if page_summaries:
         prompt = (
             f'{page_summary_context_content(page_summaries)}\n\n'
@@ -353,7 +360,11 @@ def parse_translation_response(
         end = json_to_parse.rfind("}")
         if start != -1 and end != -1 and end > start:
             json_to_parse = json_to_parse[start:end + 1]
-    data = json.loads(json_to_parse)
+    try:
+        data = json.loads(json_to_parse, strict=False)
+    except Exception:
+        from ..textdetector.detector_llm import _repair_json_text
+        data = json.loads(_repair_json_text(json_to_parse), strict=False)
     page_summary = ''
     if isinstance(data, dict):
         summary_value = data.get('page_summary', '')

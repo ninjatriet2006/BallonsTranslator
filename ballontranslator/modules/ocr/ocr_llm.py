@@ -70,12 +70,12 @@ def create_annotated_page(
     return annotated
 
 DEFAULT_OCR_SYSTEM_PROMPT = (
-    "You are an OCR engine for comic and manga image crops. Your job is to recognize visible text only. "
-    "Return raw recognized text and nothing else."
+    "You are an expert OCR engine for comic and manga image crops. Your job is to recognize visible text verbatim. "
+    "Return only the exact recognized text without explanation, translation, or markdown."
 )
 PAGE_OCR_SYSTEM_PROMPT = (
-    "You are a precise comic and manga OCR engine. Follow the fixed JSON response "
-    "contract exactly and do not return markdown or explanations."
+    "You are a precise comic and manga OCR engine. Your job is to recognize all text blocks verbatim. "
+    "Follow the fixed JSON response contract exactly and do not return markdown, translations, or explanations."
 )
 
 
@@ -356,7 +356,7 @@ class LLMOCR(LLMChatRequester, OCRBase):
                 else:
                     self.token_count_last = 0
                 if self.token_count_last:
-                    self.logger.info(f'Used {self.token_count_last} tokens (Total: {self.token_count})')
+                    self.logger.stop(f'Used {self.token_count_last} tokens (Total: {self.token_count})')
                 return completion.content
             except (LLMUserActionRequiredError, LLMRequestStopped):
                 raise
@@ -413,9 +413,14 @@ class LLMOCR(LLMChatRequester, OCRBase):
         """
 
         try:
-            data = json.loads(raw_response.strip())
-        except (TypeError, ValueError) as error:
-            raise ValueError('response is not valid JSON') from error
+            data = json.loads(raw_response.strip(), strict=False)
+        except (TypeError, ValueError):
+            try:
+                from ..textdetector.detector_llm import _clean_json_text, _repair_json_text
+                repaired = _repair_json_text(_clean_json_text(raw_response.strip()))
+                data = json.loads(repaired, strict=False)
+            except (TypeError, ValueError) as error:
+                raise ValueError('response is not valid JSON') from error
         expected_fields = {'texts', 'order'} if sort_reading_order else {'texts'}
         if not isinstance(data, dict) or set(data) != expected_fields:
             fields_label = 'texts and order' if sort_reading_order else 'texts'
@@ -455,7 +460,7 @@ class LLMOCR(LLMChatRequester, OCRBase):
             workers = profile_concurrency
         else:
             workers = getattr(pcfg.module, 'llm_ocr_threads', 2)
-        workers = max(1, min(16, int(workers)))
+        workers = max(1, int(workers))
 
         crops_and_blks = []
         im_h, im_w = img.shape[:2]

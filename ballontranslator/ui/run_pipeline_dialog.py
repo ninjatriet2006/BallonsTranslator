@@ -819,10 +819,10 @@ class RunPipelineDialog(QDialog):
         llm_ocr_threads_layout.addStretch()
         self.llm_ocr_threads_spinbox = PageRangeSpinBox(llm_ocr_threads_row)
         self.llm_ocr_threads_spinbox.setObjectName('RunPipelineLLMOCRThreadsSpinBox')
-        self.llm_ocr_threads_spinbox.setRange(1, 16)
+        self.llm_ocr_threads_spinbox.setRange(1, 999)
         self.llm_ocr_threads_spinbox.setFixedWidth(RUN_PIPELINE_SETTING_CONTROL_WIDTH)
         self.llm_ocr_threads_spinbox.setValue(getattr(pcfg.module, 'llm_ocr_threads', 2))
-        ocr_threads_help = self.tr('Concurrent worker threads for LLM OCR (1-16).')
+        ocr_threads_help = self.tr('Concurrent worker threads for LLM OCR.')
         threads_label.setToolTip(ocr_threads_help)
         self.llm_ocr_threads_spinbox.setToolTip(ocr_threads_help)
         self.llm_ocr_threads_spinbox.valueChanged.connect(self._on_llm_ocr_threads_changed)
@@ -1237,11 +1237,11 @@ class RunPipelineDialog(QDialog):
         llm_threads_layout.addStretch()
         self.llm_threads_spinbox = PageRangeSpinBox(llm_threads_row)
         self.llm_threads_spinbox.setObjectName('RunPipelineLLMThreadsSpinBox')
-        self.llm_threads_spinbox.setRange(1, 16)
+        self.llm_threads_spinbox.setRange(1, 999)
         self.llm_threads_spinbox.setFixedWidth(RUN_PIPELINE_SETTING_CONTROL_WIDTH)
         self.llm_threads_spinbox.setValue(getattr(pcfg.module, 'llm_threads', 4))
         threads_help = self.tr(
-            'Concurrent worker threads for LLM translation (1-16). '
+            'Concurrent worker threads for LLM translation. '
             'Automatically clamped to 1 when history or sequential memory is enabled.'
         )
         threads_label.setToolTip(threads_help)
@@ -1337,7 +1337,7 @@ class RunPipelineDialog(QDialog):
             self.llm_threads_spinbox.setValue(getattr(pcfg.module, 'llm_translate_threads', getattr(pcfg.module, 'llm_threads', 4)))
             self.llm_threads_spinbox.setToolTip(
                 self.tr(
-                    'Concurrent worker threads for LLM translation (1-16). '
+                    'Concurrent worker threads for LLM translation. '
                     'Automatically clamped to 1 when history or sequential memory is enabled.'
                 )
             )

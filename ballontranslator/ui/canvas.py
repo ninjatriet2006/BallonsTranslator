@@ -201,6 +201,7 @@ class Canvas(QGraphicsScene):
     paste_src_signal = Signal()
 
     format_textblks = Signal()
+    format_all_textblks = Signal()
     layout_textblks = Signal()
     reset_angle = Signal()
     squeeze_blk = Signal()
@@ -1493,6 +1494,7 @@ class Canvas(QGraphicsScene):
             menu.addSeparator()
 
             format_act = menu.addAction(self.tr("Apply font formatting"))
+            format_all_act = menu.addAction(self.tr("Apply font formatting to ALL pages..."))
             layout_act = menu.addAction(self.tr("Auto layout"))
             angle_act = menu.addAction(self.tr("Reset Angle"))
             squeeze_act = menu.addAction(self.tr("Squeeze"))
@@ -1519,6 +1521,8 @@ class Canvas(QGraphicsScene):
                 self.paste_src_signal.emit()
             elif rst == format_act:
                 self.format_textblks.emit()
+            elif rst == format_all_act:
+                self.format_all_textblks.emit()
             elif rst == layout_act:
                 self.layout_textblks.emit()
             elif rst == angle_act:

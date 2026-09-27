@@ -141,6 +141,7 @@ class LLMTranslator(LLMChatRequester, BaseTranslator):
     }
 
     def _setup_translator(self):
+        self.lang_map['Auto'] = 'Auto Detect'
         self.lang_map['简体中文'] = 'Simplified Chinese'
         self.lang_map['繁體中文'] = 'Traditional Chinese'
         self.lang_map['日本語'] = 'Japanese'

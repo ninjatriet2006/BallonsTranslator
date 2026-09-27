@@ -1,3 +1,4 @@
+import time
 import threading
 import concurrent.futures
 from typing import Callable, List, Optional, Union
@@ -615,6 +616,10 @@ class TranslateThread(ModuleThread):
         page_key: str,
     ):
         page = project.pages[page_key]
+        page_idx = project.pagename2idx(page_key) if hasattr(project, 'pagename2idx') else None
+        page_num = page_idx + 1 if page_idx is not None and page_idx >= 0 else page_key
+        trans_name = getattr(self.translator, 'name', 'Translator')
+        LOGGER.start(f"[Start][Translator][{page_num}] {trans_name} translating {page_key}")
         # A failed or partially completed full-page request must never leave the
         # old page eligible as history.
         project.begin_full_page_translation(page_key)
@@ -629,6 +634,7 @@ class TranslateThread(ModuleThread):
                 full_page=True,
             )
             _mark_translation_finished(project, page_key, self.translator)
+            LOGGER.stop(f"[Stop][Translator][{page_num}] Translation completed")
         except LLMUserActionRequiredError as e:
             success = False
             _show_llm_user_action_required_dialog(
@@ -708,9 +714,9 @@ class TranslateThread(ModuleThread):
             history_context = getattr(pcfg.module, 'llm_translate_context', '') == LLMTranslateContext.HISTORY
             summary_memory = getattr(pcfg.module, 'llm_translate_summary_memory', False)
             if not low_vram and not heavy and not history_context and not summary_memory:
-                max_workers = max(1, min(16, int(effective_configured_workers)))
+                max_workers = max(1, int(effective_configured_workers))
 
-        LOGGER.info(
+        LOGGER.debug(
             f"Translation pipeline started with {max_workers} worker(s) "
             f"(effective: {effective_configured_workers}, global: {configured_workers}, delay: {delay}s)."
         )
@@ -799,6 +805,7 @@ class ImgtransThread(QThread):
     update_ocr_progress = Signal(int)
     update_translate_progress = Signal(int)
     update_inpaint_progress = Signal(int)
+    page_stage_finished = Signal(str, int)
 
     finish_blktrans_stage = Signal(str, int)
     finish_blktrans = Signal(int, list)
@@ -969,6 +976,10 @@ class ImgtransThread(QThread):
         page_key: str,
         blk_list: List[TextBlock],
     ) -> bool:
+        page_idx = project.pagename2idx(page_key) if hasattr(project, 'pagename2idx') else None
+        page_num = page_idx + 1 if page_idx is not None and page_idx >= 0 else page_key
+        trans_name = getattr(self.translator, 'name', 'Translator')
+        LOGGER.start(f"[Start][Translator][{page_num}] {trans_name} translating {page_key}")
         project.begin_full_page_translation(page_key)
         success = self._translate_textblocks(
             blk_list,
@@ -978,6 +989,7 @@ class ImgtransThread(QThread):
         )
         if success:
             _mark_translation_finished(project, page_key, self.translator)
+            LOGGER.stop(f"[Stop][Translator][{page_num}] Translation completed")
         return success
 
     def _blktrans_pipeline(
@@ -1115,14 +1127,25 @@ class ImgtransThread(QThread):
             for process_idx, page_name in enumerate(pages_to_iterate):
                 if page_name in all_pages:
                     self.process_idx_to_page_idx[process_idx] = all_pages.index(page_name)
-            LOGGER.info(f'Processing specific pages: {len(pages_to_iterate)} pages')
         else:
             pages_to_iterate = all_pages
             self.num_pages = num_pages = len(self.imgtrans_proj.pages)
             # 处理索引等于实际页面索引
             for i in range(num_pages):
                 self.process_idx_to_page_idx[i] = i
-            LOGGER.info(f'Processing all {num_pages} pages')
+
+        self.pipeline_start_time = time.time()
+        active_stages = []
+        if cfg_module.enable_detect:
+            active_stages.append(f'Detect({cfg_module.textdetector})')
+        if cfg_module.enable_ocr:
+            active_stages.append(f'OCR({cfg_module.ocr})')
+        if cfg_module.enable_translate:
+            active_stages.append(f'Translate({cfg_module.translator})')
+        if cfg_module.enable_inpaint:
+            active_stages.append(f'Inpaint({cfg_module.inpainter})')
+        stages_str = ', '.join(active_stages) if active_stages else 'None'
+        LOGGER.start(f'Translation pipeline started: {len(pages_to_iterate)} page(s) | Stages: {stages_str}')
         if cfg_module.enable_translate and self.translator is not None:
             describe_run = getattr(
                 self.translator,
@@ -1158,11 +1181,14 @@ class ImgtransThread(QThread):
                 LOGGER.info('Image translation pipeline stopped by user')
                 break
                 
+            page_idx = self.imgtrans_proj.pagename2idx(imgname)
+            page_num = page_idx + 1 if page_idx is not None and page_idx >= 0 else imgname
             img = self.imgtrans_proj.read_img(imgname)
             mask = blk_list = None
             need_save_mask = False
             blk_removed: List[TextBlock] = []
             if cfg_module.enable_detect:
+                LOGGER.start(f"[Start][Detector][{page_num}] {self.textdetector.name} analyzing {imgname}")
                 # Detection can replace or reorder blocks, so old translations
                 # are never compatible even if detection later fails.
                 self.imgtrans_proj.begin_detection(imgname)
@@ -1208,18 +1234,21 @@ class ImgtransThread(QThread):
                     
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_DET)
                 self.update_detect_progress.emit(self.detect_counter)
+                self.page_stage_finished.emit('detect', page_idx)
+                LOGGER.stop(f"[Stop][Detector][{page_num}] Found {len(blk_list)} text blocks")
 
             if blk_list is None:
                 blk_list = self.imgtrans_proj.pages[imgname] if imgname in self.imgtrans_proj.pages else []
 
             if cfg_module.enable_ocr:
+                LOGGER.start(f"[Start][OCR][{page_num}] {self.ocr.name} recognizing text on {imgname}")
                 if hasattr(self.ocr, 'set_stop_event'):
                     self.ocr.set_stop_event(self.stop_event)
                 try:
                     is_llm_detector = getattr(self.textdetector, 'name', '') == LLM_DETECTOR_KEY
                     already_has_text = bool(blk_list and all(not text_is_empty(b.get_text()) for b in blk_list))
                     if is_llm_detector and (already_has_text or len(blk_list) == 0):
-                        LOGGER.info("All-in-One LLM Vision: text already recognized during detection; bypassing duplicate OCR stage.")
+                        LOGGER.stop(f"[Stop][OCR][{page_num}] All-in-One LLM Vision: text already recognized during detection; bypassing duplicate OCR stage.")
                         self.imgtrans_proj.pages[imgname] = blk_list
                         self.ocr_counter += 1
                     else:
@@ -1237,6 +1266,7 @@ class ImgtransThread(QThread):
                             blk_list = ocr_result
                         self.imgtrans_proj.pages[imgname] = blk_list
                         self.ocr_counter += 1
+                        LOGGER.stop(f"[Stop][OCR][{page_num}] OCR completed for {len(blk_list)} blocks")
 
                     if pcfg.restore_ocr_empty:
                         blk_list_updated = []
@@ -1296,6 +1326,8 @@ class ImgtransThread(QThread):
                     break
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_OCR)
                 self.update_ocr_progress.emit(self.ocr_counter)
+                page_idx = self.imgtrans_proj.pagename2idx(imgname)
+                self.page_stage_finished.emit('ocr', page_idx)
 
             if need_save_mask and mask is not None:
                 self.imgtrans_proj.save_mask(imgname, mask)
@@ -1319,6 +1351,7 @@ class ImgtransThread(QThread):
                 break
                         
             if cfg_module.enable_inpaint:
+                LOGGER.start(f"[Start][Inpainter][{page_num}] {self.inpainter.name} cleaning {imgname}")
                 if hasattr(self.inpainter, 'set_stop_event'):
                     self.inpainter.set_stop_event(self.stop_event)
                 if mask is None:
@@ -1354,6 +1387,8 @@ class ImgtransThread(QThread):
                 self.inpaint_counter += 1
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
                 self.update_inpaint_progress.emit(self.inpaint_counter)
+                self.page_stage_finished.emit('inpaint', page_idx)
+                LOGGER.stop(f"[Stop][Inpainter][{page_num}] Inpainting completed")
             else:
                 if len(blk_removed) > 0:
                     self.imgtrans_proj.load_mask_by_imgname
@@ -1463,6 +1498,7 @@ class ModuleManager(QObject):
     imgtrans_pipeline_finished = Signal()
     blktrans_pipeline_finished = Signal(int, list)
     page_trans_finished = Signal(int)
+    page_stage_finished = Signal(str, int)
     module_selection_changed = Signal(str, str)
 
     run_canvas_inpaint = False
@@ -1531,6 +1567,7 @@ class ModuleManager(QObject):
         self.imgtrans_thread.update_ocr_progress.connect(self.on_update_ocr_progress)
         self.imgtrans_thread.update_translate_progress.connect(self.on_update_translate_progress)
         self.imgtrans_thread.update_inpaint_progress.connect(self.on_update_inpaint_progress)
+        self.imgtrans_thread.page_stage_finished.connect(self.page_stage_finished)
         self.imgtrans_thread.finish_blktrans_stage.connect(self.on_finish_blktrans_stage)
         self.imgtrans_thread.finish_blktrans.connect(self.on_finish_blktrans)
         self.imgtrans_thread.pipeline_stopped.connect(self.on_imgtrans_thread_stopped)
@@ -2194,7 +2231,9 @@ class ModuleManager(QObject):
     
     def stopImgtransPipeline(self):
         """停止图像翻译流程"""
-        LOGGER.info('Stopping image translation pipeline...')
+        start_time = getattr(self.imgtrans_thread, 'pipeline_start_time', None)
+        elapsed_str = f" after {time.time() - start_time:.1f}s" if start_time else ""
+        LOGGER.stop(f"Translation pipeline stopped by user{elapsed_str}.")
         self.imgtrans_thread.requestStop()
         if hasattr(self.translate_thread, 'pipeline_pagekey_queue'):
             self.translate_thread.pipeline_pagekey_queue.clear()
@@ -2315,6 +2354,19 @@ class ModuleManager(QObject):
     def finishImgtransPipeline(self):
         if self.proj_finished():
             self.progress_msgbox.hide()
+            start_time = getattr(self.imgtrans_thread, 'pipeline_start_time', None)
+            elapsed_str = f" in {time.time() - start_time:.1f}s" if start_time else ""
+            stats = []
+            if cfg_module.enable_detect:
+                stats.append(f"Detect: {self.imgtrans_thread.detect_counter}")
+            if cfg_module.enable_ocr:
+                stats.append(f"OCR: {self.imgtrans_thread.ocr_counter}")
+            if cfg_module.enable_translate:
+                stats.append(f"Translate: {self.imgtrans_thread.translate_counter}")
+            if cfg_module.enable_inpaint:
+                stats.append(f"Inpaint: {self.imgtrans_thread.inpaint_counter}")
+            stats_str = f" | Stats: {', '.join(stats)}" if stats else ""
+            LOGGER.stop(f"Translation pipeline completed: {self.imgtrans_thread.num_pages} page(s){elapsed_str}{stats_str}")
             self.imgtrans_pipeline_finished.emit()
     
     def on_imgtrans_thread_stopped(self):

@@ -103,7 +103,7 @@ class LLMContextEditor(QSplitter):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(80)
         self._page_widget = page_widget
         self._project = project
         self._page_key = project.current_img if project is not None else None

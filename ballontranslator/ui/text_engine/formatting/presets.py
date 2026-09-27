@@ -78,6 +78,7 @@ class TextStyleLabel(Widget):
     delete_btn_clicked = Signal()
     stylelabel_activated = Signal(bool)
     apply_fontfmt = Signal(FontFormat)
+    apply_all_fontfmt = Signal(FontFormat)
 
     def __init__(self, style_name: str = '', parent: Widget = None, fontfmt: FontFormat = None, active_stylename_edited: Signal = None):
         super().__init__(parent=parent)
@@ -100,7 +101,7 @@ class TextStyleLabel(Widget):
         self.stylelabel.edit_finished.connect(self.on_style_name_edited)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
-        self.setToolTip(self.tr('Click to set as Global format. Double click to edit name. Drag to reorder.'))
+        self.setToolTip(self.tr('Click to set as Global format. Right click for options. Double click to edit name. Drag to reorder.'))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         BTN_SIZE = 14
@@ -155,6 +156,27 @@ class TextStyleLabel(Widget):
 
     def on_applybtn_clicked(self, *args, **kwargs):
         self.apply_fontfmt.emit(self.fontfmt)
+
+    def contextMenuEvent(self, e: QContextMenuEvent):
+        menu = QMenu(self)
+        apply_act = menu.addAction(self.tr('Apply to selected blocks'))
+        apply_all_act = menu.addAction(self.tr('Apply to ALL pages in project...'))
+        menu.addSeparator()
+        update_act = menu.addAction(self.tr('Update from active style'))
+        rename_act = menu.addAction(self.tr('Rename'))
+        delete_act = menu.addAction(self.tr('Delete'))
+
+        rst = menu.exec_(e.globalPos())
+        if rst == apply_act:
+            self.on_applybtn_clicked()
+        elif rst == apply_all_act:
+            self.apply_all_fontfmt.emit(self.fontfmt)
+        elif rst == update_act:
+            self.on_updatebtn_clicked()
+        elif rst == rename_act:
+            self.startEdit(select_all=True)
+        elif rst == delete_act:
+            self.on_delete_btn_clicked()
 
     def update_style(self, fontfmt: FontFormat = None):
         if fontfmt is None:
@@ -313,6 +335,7 @@ class TextStylePresetPanel(PanelArea):
     entered = False
     active_text_style_label_changed = Signal()
     apply_fontfmt = Signal(FontFormat)
+    apply_all_fontfmt = Signal(FontFormat)
     active_stylename_edited = Signal()
     export_style = Signal()
     import_style = Signal()
@@ -429,6 +452,7 @@ class TextStylePresetPanel(PanelArea):
         textstylelabel.delete_btn_clicked.connect(self.on_deletebtn_clicked)
         textstylelabel.stylelabel_activated.connect(self.on_stylelabel_activated)
         textstylelabel.apply_fontfmt.connect(self.apply_fontfmt)
+        textstylelabel.apply_all_fontfmt.connect(self.apply_all_fontfmt)
 
     def _moveStyleLabelToIndex(self, source_index: int, target_index: int) -> None:
         if not 0 <= source_index < self.count():
@@ -552,6 +576,7 @@ class TextStylePresetPanel(PanelArea):
         menu = QMenu()
 
         new_act = menu.addAction(self.tr('New Text Style'))
+        apply_active_all_act = menu.addAction(self.tr('Apply active style to ALL pages...'))
         removeall_act = menu.addAction(self.tr('Remove all'))
         menu.addSeparator()
         import_act = menu.addAction(self.tr('Import Text Styles'))
@@ -561,6 +586,9 @@ class TextStylePresetPanel(PanelArea):
 
         if rst == new_act:
             self.on_newbtn_clicked()
+        elif rst == apply_active_all_act:
+            if C.active_format is not None:
+                self.apply_all_fontfmt.emit(C.active_format)
         elif rst == removeall_act:
             self.on_clearbtn_clicked()
         elif rst == import_act:

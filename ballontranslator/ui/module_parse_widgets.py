@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QGridLayout,
     QPushButton,
+    QToolButton,
     QSizePolicy,
     QMenu,
     QDialog,
@@ -443,7 +444,29 @@ class ParamWidget(QWidget):
                 param_label = ParamNameLabel(display_param_name)
                 param_label.setObjectName('ParamLabelAboveLabel')
                 set_label_tooltip_from_widget(param_label, param_widget)
-                row_layout.addWidget(param_label, 0, Qt.AlignmentFlag.AlignLeft)
+
+                default_value = param_dict.get('default_value') if isinstance(param_dict, dict) else None
+                if default_value is not None:
+                    header_widget = QWidget(row_widget)
+                    header_widget.setObjectName('ParamLabelAboveHeaderWidget')
+                    header_layout = QHBoxLayout(header_widget)
+                    header_layout.setContentsMargins(0, 0, 0, 0)
+                    header_layout.setSpacing(6)
+                    header_layout.addWidget(param_label, 0, Qt.AlignmentFlag.AlignLeft)
+                    header_layout.addStretch(1)
+
+                    reset_btn = QToolButton(header_widget)
+                    reset_btn.setObjectName('ParamResetDefaultBtn')
+                    reset_btn.setText(self.tr('Reset to default'))
+                    reset_btn.setToolTip(self.tr('Reset this prompt to default'))
+                    reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    reset_btn.clicked.connect(lambda _, w=param_widget, val=default_value: w.setText(val))
+                    header_layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignRight)
+                    header_widget.setFixedWidth(param_widget.width())
+                    row_layout.addWidget(header_widget, 0, Qt.AlignmentFlag.AlignLeft)
+                else:
+                    row_layout.addWidget(param_label, 0, Qt.AlignmentFlag.AlignLeft)
+
                 row_layout.addWidget(param_widget, 0, Qt.AlignmentFlag.AlignLeft)
                 column_span = 3 if spaced_fields else 2
                 param_layout.addWidget(row_widget, ii, 0, 1, column_span)

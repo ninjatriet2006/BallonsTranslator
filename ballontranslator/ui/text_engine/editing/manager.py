@@ -4,7 +4,8 @@ from typing import List, Optional, Sequence, Union, Tuple
 import numpy as np
 import copy
 
-from qtpy.QtWidgets import QApplication, QWidget
+from qtpy.QtWidgets import QApplication, QWidget, QMessageBox, QCheckBox
+from ballontranslator.utils.text_effects import without_project_raster_effects
 from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF
 from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetricsF, QFont, QTextCharFormat, QClipboard
 try:
@@ -33,7 +34,9 @@ from .commands import (
     propagate_user_edit,
 )
 from ..formatting.panel import FontFormatPanel
+from ballontranslator.utils import config as C
 from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.logger import logger as LOGGER
 from ballontranslator.utils import shared
 from ballontranslator.utils.imgproc_utils import extract_ballon_region, get_block_mask
 from ballontranslator.utils.text_processing import seg_text, is_cjk
@@ -382,6 +385,7 @@ class SceneTextManager(QObject):
         self.canvas.copy_textblks.connect(self.onCopyBlkItems)
         self.canvas.paste_textblks.connect(self.onPasteBlkItems)
         self.canvas.format_textblks.connect(self.onFormatTextblks)
+        self.canvas.format_all_textblks.connect(self.onFormatAllPages)
         self.canvas.layout_textblks.connect(self.onAutoLayoutTextblks)
         self.canvas.reset_angle.connect(self.onResetAngle)
         self.canvas.squeeze_blk.connect(self.onSqueezeBlk)
@@ -403,6 +407,9 @@ class SceneTextManager(QObject):
         self.textEditList.rearrange_blks.connect(self.on_rearrange_blks)
         self.formatpanel = textpanel.formatpanel
         self.formatpanel.textstyle_panel.apply_fontfmt.connect(self.onFormatTextblks)
+        self.formatpanel.textstyle_panel.apply_all_fontfmt.connect(self.onFormatAllPages)
+        if hasattr(self.formatpanel, 'apply_all_fontfmt'):
+            self.formatpanel.apply_all_fontfmt.connect(self.onFormatAllPages)
 
         self.imgtrans_proj = self.canvas.imgtrans_proj
         self.textblk_item_list: List[TextBlkItem] = []
@@ -811,6 +818,84 @@ class SceneTextManager(QObject):
             fmt = self.formatpanel.global_format
         self.apply_fontformat(fmt)
 
+    def onFormatAllPages(self, fmt: FontFormat = None) -> None:
+        try:
+            if fmt is None:
+                fmt = getattr(C, 'active_format', None) or getattr(self.formatpanel, 'global_format', None)
+            if fmt is None:
+                return
+
+            proj = self.imgtrans_proj
+            if not proj or not proj.pages:
+                return
+
+            total_pages = len(proj.pages)
+            total_blocks = sum(len(blks) for blks in proj.pages.values())
+            if total_blocks == 0:
+                return
+
+            parent_win = getattr(self, 'mainwindow', None) or QApplication.activeWindow()
+            dialog = QMessageBox(parent_win)
+            dialog.setWindowTitle(self.tr("Apply to All Pages"))
+            dialog.setText(
+                self.tr("Apply this font format and effects to ALL {0} pages ({1} text blocks)?").format(
+                    total_pages, total_blocks
+                )
+            )
+            dialog.setIcon(QMessageBox.Icon.Question)
+            keep_size_cb = QCheckBox(self.tr("Keep individual bubble font sizes"), dialog)
+            keep_size_cb.setChecked(True)
+            dialog.setCheckBox(keep_size_cb)
+            dialog.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+            dialog.setDefaultButton(QMessageBox.StandardButton.Ok)
+
+            if dialog.exec() != QMessageBox.StandardButton.Ok:
+                return
+
+            keep_size = keep_size_cb.isChecked()
+            portable_format = fmt.deepcopy()
+            portable_format.text_effects = without_project_raster_effects(
+                portable_format.text_effects
+            )
+
+            if hasattr(self.formatpanel, 'resolve_text_transform_edits_for_history_change'):
+                self.formatpanel.resolve_text_transform_edits_for_history_change()
+
+            for page_name, blk_list in proj.pages.items():
+                for blk in blk_list:
+                    old_size = blk.font_size
+                    old_det_size = getattr(blk, '_detected_font_size', -1)
+                    blk.fontformat.merge(portable_format)
+                    if keep_size and old_size > 0:
+                        blk.font_size = old_size
+                        blk._detected_font_size = old_det_size
+
+            for item in self.textblk_item_list:
+                old_size = item.font_size
+                item.set_fontformat(portable_format, set_char_format=True)
+                if keep_size and old_size > 0:
+                    item.setFontSize(old_size)
+
+            self.formatpanel.set_active_format(portable_format)
+            if hasattr(self.canvas, 'update'):
+                self.canvas.update()
+
+            try:
+                proj.save()
+            except Exception as e:
+                LOGGER.warning(f"Failed to auto-save project after format all: {e}")
+
+            if parent_win is not None:
+                if hasattr(parent_win, 'setWindowModified'):
+                    parent_win.setWindowModified(True)
+                if hasattr(parent_win, 'statusBar') and parent_win.statusBar() is not None:
+                    parent_win.statusBar().showMessage(
+                        self.tr("Applied formatting to all {0} pages.").format(total_pages),
+                        4000,
+                    )
+        except Exception as e:
+            LOGGER.error(f"Error in onFormatAllPages: {e}", exc_info=True)
+
     def onAutoLayoutTextblks(self):
         selected_blks = self.canvas.selected_text_items()
         old_html_lst, old_rect_lst, trans_widget_lst = [], [], []
@@ -865,13 +950,23 @@ class SceneTextManager(QObject):
             self._update_selection_panels([item])
         session.activate_last_projective(item)
 
-    def layout_textblk(self, blkitem: TextBlkItem, text: str = None, mask: np.ndarray = None, bounding_rect: List = None, region_rect: List = None):
+    def layout_textblk(
+        self,
+        blkitem: TextBlkItem,
+        text: str = None,
+        mask: np.ndarray = None,
+        bounding_rect: List = None,
+        region_rect: List = None,
+        img: np.ndarray = None,
+        update_widgets: bool = True,
+    ):
         
         '''
         auto text layout, vertical writing is not supported yet.
         '''
 
-        img = self.imgtrans_proj.img_array
+        if img is None:
+            img = self.imgtrans_proj.img_array
         if img is None:
             return
 
@@ -905,7 +1000,7 @@ class SceneTextManager(QObject):
             bounding_rect = blkitem.absBoundingRect(max_h=im_h, max_w=im_w)
             if bounding_rect[2] <= 0 or bounding_rect[3] <= 0:
                 blkitem.setPlainText(text)
-                if len(self.pairwidget_list) > blkitem.idx:
+                if update_widgets and len(self.pairwidget_list) > blkitem.idx:
                     self.pairwidget_list[blkitem.idx].e_trans.setPlainText(text)
                 return
             if tgt_is_cjk:
@@ -1037,7 +1132,7 @@ class SceneTextManager(QObject):
         maxw = max([ffmt.horizontalAdvance(t) for t in new_text.split('\n')])
         blkitem.set_size(maxw * 1.5, xywh[3], set_layout_maxsize=True)
         blkitem.setPlainText(new_text)
-        if len(self.pairwidget_list) > blkitem.idx:
+        if update_widgets and len(self.pairwidget_list) > blkitem.idx:
             self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
         if restore_charfmts:
             self.restore_charfmts(blkitem, text, new_text, char_fmts)

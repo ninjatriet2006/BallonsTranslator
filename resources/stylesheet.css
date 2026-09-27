@@ -160,8 +160,8 @@ QWidget#ModuleParamContent QComboBox::drop-down {
     border: none;
 }
 
-QWidget#ConfigContentScrollContent QSpinBox#SpellCheckDistanceSpin,
-QWidget#ConfigContentScrollContent QSpinBox#AutoTateChuYokoMaxLength {
+QWidget#ConfigContentScrollContent QSpinBox,
+QWidget#ConfigContentScrollContent QDoubleSpinBox {
     border: none;
     border-bottom: 1px solid @borderColor;
     border-radius: 6px;
@@ -171,16 +171,16 @@ QWidget#ConfigContentScrollContent QSpinBox#AutoTateChuYokoMaxLength {
     font-size: 13px;
 }
 
-QWidget#ConfigContentScrollContent QSpinBox#SpellCheckDistanceSpin:focus,
-QWidget#ConfigContentScrollContent QSpinBox#AutoTateChuYokoMaxLength:focus {
+QWidget#ConfigContentScrollContent QSpinBox:focus,
+QWidget#ConfigContentScrollContent QDoubleSpinBox:focus {
     border: none;
     border-bottom: 1px solid rgb(30, 147, 229);
 }
 
-QWidget#ConfigContentScrollContent QSpinBox#SpellCheckDistanceSpin::up-button,
-QWidget#ConfigContentScrollContent QSpinBox#SpellCheckDistanceSpin::down-button,
-QWidget#ConfigContentScrollContent QSpinBox#AutoTateChuYokoMaxLength::up-button,
-QWidget#ConfigContentScrollContent QSpinBox#AutoTateChuYokoMaxLength::down-button {
+QWidget#ConfigContentScrollContent QSpinBox::up-button,
+QWidget#ConfigContentScrollContent QSpinBox::down-button,
+QWidget#ConfigContentScrollContent QDoubleSpinBox::up-button,
+QWidget#ConfigContentScrollContent QDoubleSpinBox::down-button {
     border: none;
     background-color: transparent;
 }
@@ -709,6 +709,24 @@ QGroupBox#LLMProfileCard QFrame#LLMProfileDetailSectionLine {
     border: none;
     border-top: 1px solid @borderColor;
     background-color: transparent;
+}
+
+QToolButton#ParamResetDefaultBtn {
+    border: none;
+    border-radius: 3px;
+    background-color: transparent;
+    color: @titleBarColor;
+    font-size: 11px;
+    padding: 1px 6px;
+}
+
+QToolButton#ParamResetDefaultBtn:hover {
+    background-color: @pushBtnBackgroundColor;
+    color: rgb(30, 147, 229);
+}
+
+QToolButton#ParamResetDefaultBtn:pressed {
+    background-color: @noboderPushBtnBackgroundColor;
 }
 
 QGroupBox#LLMProfileCard QPlainTextEdit {

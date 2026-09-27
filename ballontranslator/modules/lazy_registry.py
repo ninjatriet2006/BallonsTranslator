@@ -667,9 +667,13 @@ def _collect_translator_langs(class_node: ast.ClassDef, env: Dict[str, Any]) -> 
     if cht_require_convert and '简体中文' in langs and '繁體中文' not in langs:
         langs.append('繁體中文')
     if src is None:
-        src = langs or None
+        src = langs.copy() if langs else None
     if tgt is None:
-        tgt = langs or None
+        tgt = [l for l in langs if l != 'Auto'] if langs else None
+    if src is not None and 'Auto' in src:
+        src = ['Auto'] + [l for l in src if l != 'Auto']
+    if tgt is not None and 'Auto' in tgt:
+        tgt = [l for l in tgt if l != 'Auto']
     if not langs and src is None and tgt is None:
         warnings.append(f'{class_node.name} has no lazy translator language metadata')
     return src, tgt, warnings

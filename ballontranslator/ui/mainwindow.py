@@ -7,8 +7,8 @@ from functools import partial
 import time
 
 from tqdm import tqdm
-from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QWidget, QColorDialog
-from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer
+from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout, QApplication, QStackedWidget, QSplitter, QListWidget, QShortcut, QListWidgetItem, QMessageBox, QTextEdit, QPlainTextEdit, QDialog, QWidget, QColorDialog, QGraphicsScene
+from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer, QRectF
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QPainter, QClipboard, QColor
 
 from ballontranslator.utils.logger import logger as LOGGER
@@ -24,7 +24,8 @@ from ballontranslator.utils.text_effects import (
 from ballontranslator.utils import shared
 from ballontranslator.utils.message import create_error_dialog, create_info_dialog
 from ballontranslator.modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
-from .misc import parse_stylesheet, set_html_family, QKEY
+from .misc import parse_stylesheet, set_html_family, QKEY, ndarray2pixmap
+from .text_engine.item import TextBlkItem
 from ballontranslator.utils.config import (
     FontFormat,
     ProgramConfig,
@@ -478,6 +479,7 @@ class MainWindow(mainwindow_cls):
         self.module_manager = module_manager = ModuleManager(self.imgtrans_proj)
         module_manager.imgtrans_pipeline_finished.connect(self.on_imgtrans_pipeline_finished)
         module_manager.page_trans_finished.connect(self.on_pagtrans_finished)
+        module_manager.page_stage_finished.connect(self.on_page_stage_finished)
         module_manager.setupThread(
             self.configPanel,
             self.imgtrans_progress_msgbox,
@@ -1689,6 +1691,123 @@ class MainWindow(mainwindow_cls):
                 self.canvas.block_selection_signal = False
             if editing_textitem is not None:
                 editing_textitem.startEdit()
+
+    def render_and_save_page_offscreen(
+        self,
+        page_index: int,
+        auto_textlayout: bool = False,
+        squeeze_bounding_rect: bool = False,
+    ):
+        if self.imgtrans_proj.is_empty:
+            return
+
+        imgname = self.imgtrans_proj.idx2pagename(page_index)
+        if imgname is None:
+            return
+
+        inpainted = self.imgtrans_proj.load_inpainted_by_imgname(imgname)
+        if inpainted is None:
+            try:
+                inpainted = self.imgtrans_proj.read_img(imgname)
+            except Exception as e:
+                LOGGER.error(f"Failed to load image for offscreen render ({imgname}): {e}")
+                return
+        if inpainted is None:
+            return
+
+        h, w = inpainted.shape[:2]
+        result = ndarray2pixmap(inpainted, return_qimg=True).copy()
+
+        blk_list = self.imgtrans_proj.get_blklist_byidx(page_index)
+        scene = QGraphicsScene(0, 0, w, h)
+        text_items = []
+        enabled_export_effect_items = []
+        painter = None
+
+        try:
+            default_font = None
+            if hasattr(self, 'st_manager') and hasattr(self.st_manager, 'formatpanel'):
+                default_font = self.st_manager.formatpanel.familybox.currentText()
+
+            for idx, blk in enumerate(blk_list):
+                if (blk.font_family is None or blk.font_family.strip() == '') and default_font:
+                    blk.font_family = default_font
+
+                translation = ''
+                if auto_textlayout and not blk.vertical:
+                    translation = blk.translation
+                    blk.translation = ''
+
+                blk_item = TextBlkItem(blk=blk, idx=idx, set_format=True, show_rect=False)
+
+                if translation:
+                    blk.translation = translation
+                    rst = self.st_manager.layout_textblk(
+                        blk_item,
+                        text=translation,
+                        img=inpainted,
+                        update_widgets=False,
+                    )
+                    if rst is None:
+                        blk_item.setPlainText(translation)
+
+                if squeeze_bounding_rect:
+                    blk_item.squeezeBoundingRect()
+
+                if not blk_item.document().isEmpty():
+                    blk_item.blk.rich_text = blk_item.toHtml()
+                    blk_item.blk.translation = blk_item.toPlainText()
+                else:
+                    blk_item.blk.rich_text = ''
+                    blk_item.blk.translation = ''
+                blk_item.blk._bounding_rect = blk_item.absBoundingRect()
+                blk_item.updateBlkFormat()
+
+                blk_item.set_ui_guide_suppressed(True)
+                if (
+                    not blk_item._text_transform_is_neutral()
+                    or blk_item.effect_renderer.has_raster_effects()
+                ):
+                    enabled_export_effect_items.append(blk_item)
+                    blk_item.set_export_effect_render(True)
+
+                scene.addItem(blk_item)
+                text_items.append(blk_item)
+
+            painter = QPainter(result)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = QRectF(0, 0, w, h)
+            scene.render(painter, rect, rect)
+            for item in enabled_export_effect_items:
+                if item.export_effect_error is not None:
+                    raise item.export_effect_error
+
+        except Exception as e:
+            LOGGER.error(f"Failed to render offscreen result image for {imgname}: {e}")
+        finally:
+            if painter is not None and painter.isActive():
+                painter.end()
+            for item in enabled_export_effect_items:
+                item.set_export_effect_render(False)
+            for item in text_items:
+                item.set_ui_guide_suppressed(False)
+            scene.clear()
+
+        # Save result image via imsave_thread
+        try:
+            if not osp.exists(self.imgtrans_proj.result_dir()):
+                os.makedirs(self.imgtrans_proj.result_dir())
+            imsave_path = self.imgtrans_proj.get_result_path(imgname)
+            has_alpha = len(inpainted.shape) > 2 and inpainted.shape[-1] == 4
+            self.imsave_thread.saveImg(
+                imsave_path,
+                result,
+                imgname,
+                save_params={'ext': pcfg.imgsave_ext, 'quality': pcfg.imgsave_quality},
+                keep_alpha=has_alpha,
+            )
+        except Exception as e:
+            LOGGER.error(f"Failed to save offscreen result image for {imgname}: {e}")
         
     def to_trans_config(self):
         self.show_module_param_dialog('translator', pcfg.module.translator)
@@ -1914,6 +2033,21 @@ class MainWindow(mainwindow_cls):
                     blk.alignment = TextAlignment.Center
                 blk.vertical = False
 
+    def on_page_stage_finished(self, stage: str, page_index: int) -> None:
+        """Real-time UI feedback when a stage finishes for the currently active page."""
+        is_active_page = (
+            self.pageList.currentIndex().isValid()
+            and page_index == self.pageList.currentIndex().row()
+        )
+        if not is_active_page:
+            return
+
+        if stage in ('detect', 'ocr'):
+            self.st_manager.updateSceneTextitems()
+        elif stage == 'inpaint':
+            self.imgtrans_proj.set_current_img_byidx(page_index)
+            self.canvas.updateCanvas()
+
     def on_pagtrans_finished(self, page_index: int):
         blk_list = self.imgtrans_proj.get_blklist_byidx(page_index)
         ffmt_list = None
@@ -2035,27 +2169,39 @@ class MainWindow(mainwindow_cls):
             self.st_manager.auto_textlayout_flag = pcfg.let_autolayout_flag and \
                 (enable_detect or enable_translate)
         
-        if page_index != self.pageList.currentIndex().row():
-            self.pageList.setCurrentRow(page_index)
-        else:
+        is_active_page = (page_index == self.pageList.currentIndex().row())
+
+        if is_active_page:
             self.imgtrans_proj.set_current_img_byidx(page_index)
             self.canvas.updateCanvas()
             self.st_manager.updateSceneTextitems()
 
-        if not enable_detect and enable_translate:
-            for blkitem in self.st_manager.textblk_item_list:
-                blkitem.squeezeBoundingRect()
+            if not enable_detect and enable_translate:
+                for blkitem in self.st_manager.textblk_item_list:
+                    blkitem.squeezeBoundingRect()
 
-        if page_index + 1 == self.imgtrans_proj.num_pages:
-            self.st_manager.auto_textlayout_flag = False
+            if page_index + 1 == self.imgtrans_proj.num_pages:
+                self.st_manager.auto_textlayout_flag = False
 
-        self.llmContextEditor.refresh_context()
+            self.llmContextEditor.refresh_context()
 
-        # save proj file on page trans finished
-        self.imgtrans_proj.save()
-        self._llm_context_dirty = False
+            # save proj file on page trans finished
+            self.imgtrans_proj.save()
+            self._llm_context_dirty = False
 
-        self.saveCurrentPage(False, False)
+            self.saveCurrentPage(False, False)
+        else:
+            self.render_and_save_page_offscreen(
+                page_index,
+                auto_textlayout=self.st_manager.auto_textlayout_flag,
+                squeeze_bounding_rect=(not enable_detect and enable_translate),
+            )
+            if page_index + 1 == self.imgtrans_proj.num_pages:
+                self.st_manager.auto_textlayout_flag = False
+
+            if self.pageList.currentIndex().row() >= 0:
+                self.st_manager.updateTextBlkList()
+            self.imgtrans_proj.save()
 
     def on_savestate_changed(self, unsaved: bool) -> None:
         if not unsaved and self._llm_context_dirty:
@@ -2251,24 +2397,12 @@ class MainWindow(mainwindow_cls):
             if has_explicit_range:
                 pipeline_pages = requested_pages
 
-        if enable_detect:
-            for page in requested_pages:
-                if not pcfg.module.keep_exist_textlines and not continue_mode:
-                    self.imgtrans_proj.pages[page].clear()
-        else:
-            self.st_manager.updateTextBlkList()
-            for page_name in requested_pages:
+        self.st_manager.updateTextBlkList()
+        if not enable_detect:
+            for page_name in all_page_names:
                 blklist = self.imgtrans_proj.pages[page_name]
-                ffmt_list = []
+                ffmt_list = [textblk.fontformat.deepcopy() for textblk in blklist]
                 self.backup_blkstyles.append(ffmt_list)
-                for textblk in blklist:
-                    ffmt_list.append(textblk.fontformat.deepcopy())
-                    if enable_ocr:
-                        textblk.text = []
-                        textblk.set_font_colors((0, 0, 0), (0, 0, 0))
-                    if enable_translate or (all_disabled and not self._run_imgtrans_wo_textstyle_update) or enable_ocr:
-                        textblk.rich_text = ''
-                    textblk.vertical = textblk.src_is_vertical
 
         self.module_manager.runImgtransPipeline(
             pipeline_pages,

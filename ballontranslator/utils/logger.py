@@ -5,7 +5,14 @@ import os.path as osp
 from glob import glob
 
 
+START_LEVEL = 25
+STOP_LEVEL = 26
+logging.addLevelName(START_LEVEL, "START")
+logging.addLevelName(STOP_LEVEL, "STOP")
+
 COLORS = {
+    "START": "green",
+    "STOP": "cyan",
     "WARNING": "yellow",
     "INFO": "white",
     "DEBUG": "blue",
@@ -67,7 +74,7 @@ class ColoredFormatter(logging.Formatter):
                     attrs={"bold": True},
                 )
 
-            record.levelname2 = colored("{:<7}".format(record.levelname))
+            record.levelname2 = colored(record.levelname)
             record.message2 = colored(record.getMessage())
 
             asctime2 = datetime.datetime.fromtimestamp(record.created)
@@ -76,6 +83,13 @@ class ColoredFormatter(logging.Formatter):
             record.module2 = _colored(record.module, color="cyan")
             record.funcName2 = _colored(record.funcName, color="cyan")
             record.lineno2 = _colored(record.lineno, color="cyan")
+        else:
+            record.levelname2 = record.levelname
+            record.message2 = record.getMessage()
+            record.asctime2 = str(datetime.datetime.fromtimestamp(record.created))
+            record.module2 = record.module
+            record.funcName2 = record.funcName
+            record.lineno2 = str(record.lineno)
         return logging.Formatter.format(self, record)
 
 FORMAT = (
@@ -94,6 +108,14 @@ class ColoredLogger(logging.Logger):
 
         self.addHandler(console)
         return
+
+    def start(self, msg, *args, **kwargs):
+        if self.isEnabledFor(START_LEVEL):
+            self._log(START_LEVEL, msg, args, **kwargs)
+
+    def stop(self, msg, *args, **kwargs):
+        if self.isEnabledFor(STOP_LEVEL):
+            self._log(STOP_LEVEL, msg, args, **kwargs)
 
 
 def setup_logging(logfile_dir: str, max_num_logs=14):

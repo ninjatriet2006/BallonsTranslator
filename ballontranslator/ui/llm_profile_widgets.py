@@ -45,6 +45,9 @@ from .module_parse_widgets import ParamWidget, SecretParamWidget
 from ballontranslator.utils.shared import size2width
 from ballontranslator.utils.config import pcfg
 from ballontranslator.utils.llm_profiles import (
+    DEFAULT_INPAINT_PROMPT,
+    DEFAULT_OCR_PROMPT,
+    DEFAULT_TRANSLATION_PROMPT,
     LLM_INPAINT_KEY,
     LLM_OCR_KEY,
     LLM_TRANSLATOR_KEY,
@@ -113,7 +116,13 @@ PROFILE_FIELD_TYPES = get_type_hints(LLMProfile)
 
 
 def _widen_profile_editor(editor: QWidget):
-    editor.setFixedWidth(round(editor.width() * PROFILE_EDITOR_WIDTH_SCALE))
+    new_w = round(editor.width() * PROFILE_EDITOR_WIDTH_SCALE)
+    editor.setFixedWidth(new_w)
+    parent = editor.parentWidget()
+    if parent is not None and parent.objectName() == 'ParamLabelAboveRow':
+        header = parent.findChild(QWidget, 'ParamLabelAboveHeaderWidget')
+        if header is not None:
+            header.setFixedWidth(new_w)
 
 
 class ProfileNameEdit(QLineEdit):
@@ -444,7 +453,7 @@ class ProfileCardWidget(QGroupBox):
             'prompt': self.tr('Additional translation instructions for style and wording.'),
             'vision_prompt': self.tr('Instructions sent to the vision model for OCR.'),
             'image_prompt': self.tr('Instructions sent to the image model for cleanup.'),
-            'concurrency': self.tr('Maximum concurrent worker threads for this profile (0 = follow global settings, 1-16 to override).'),
+            'concurrency': self.tr('Maximum concurrent worker threads for this profile (0 = follow global settings, >0 to override).'),
             'request_delay': self.tr('Minimum cooldown delay in seconds between requests for this profile (0 = follow global settings).'),
             'rpm_limit': self.tr('Maximum requests per minute allowed for this profile (0 = unlimited / follow global settings).'),
             'max_tokens': self.tr('Maximum generated response tokens, not input/context tokens.'),
@@ -836,12 +845,20 @@ class ProfileCardWidget(QGroupBox):
                     'description': description,
                 }
             elif widget_type == 'editor':
+                default_val = ''
+                if key == 'prompt':
+                    default_val = DEFAULT_TRANSLATION_PROMPT
+                elif key == 'vision_prompt':
+                    default_val = DEFAULT_OCR_PROMPT
+                elif key == 'image_prompt':
+                    default_val = DEFAULT_INPAINT_PROMPT
                 params[key] = {
                     'type': 'editor',
                     'value': str(value or ''),
                     'display_name': display_name,
                     'description': description,
                     'label_above': True,
+                    'default_value': default_val,
                 }
             else:
                 params[key] = {

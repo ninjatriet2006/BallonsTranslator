@@ -19,6 +19,7 @@ from ballontranslator.modules.exceptions import (
 )
 from ballontranslator.utils.config import pcfg
 from ballontranslator.utils.llm_profiles import (
+    DEFAULT_OCR_PROMPT,
     LLMProfile,
     runtime_profile,
 )
@@ -26,20 +27,24 @@ from ballontranslator.utils.textblock import sort_regions, examine_textblk, sort
 
 
 DETECTOR_SYSTEM_PROMPT = (
-    "You are an expert manga and comic OCR and text detection engine. "
-    "Your task is to detect all text blocks (speech balloons, narration boxes, "
+    "You are an expert manga and comic OCR and text detection engine.\n"
+    "Your task is to detect all text clusters (dialogue in speech balloons, narration boxes, "
     "thought bubbles, sound effects, and side text) in the comic image and transcribe their exact original text.\n"
-    "Respond with a JSON object containing a 'blocks' array. "
-    "Each block must have:\n"
-    "- 'box_2d': [ymin, xmin, ymax, xmax] normalized between 0 and 1000.\n"
-    "- 'text': verbatim transcription of the text.\n"
-    "- 'vertical': true if text is vertical (top-to-bottom), false if horizontal.\n"
-    "Do not include any explanation or markdown; output pure JSON only."
+    "Guidelines:\n"
+    "1. Detect separate bounding boxes for distinct speech bubbles; do not merge adjacent bubbles.\n"
+    "2. 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding the whole text bubble/cluster, normalized from 0 to 1000.\n"
+    "3. 'text': verbatim transcription of the visible text inside the box, preserving line breaks with \\n.\n"
+    "4. 'vertical': true if text is vertical (top-to-bottom), false if horizontal.\n"
+    "5. 'lines': optional list of tight child bounding boxes for each individual text line within the block. "
+    "Each child line has 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding only that line, and 'text'.\n"
+    "6. Order blocks and child lines according to natural comic reading order (top-to-bottom, right-to-left for manga).\n"
+    "Respond with pure JSON matching the schema: {\"blocks\": [{\"box_2d\": [...], \"text\": \"...\", \"vertical\": bool, \"lines\": [{\"box_2d\": [...]}]}]}. "
+    "Do not include any explanation or markdown wrappers."
 )
 
 DETECTOR_USER_PROMPT = (
     "Detect all text boxes and transcribe their text in this manga/comic page. "
-    "Return the 2D bounding boxes [ymin, xmin, ymax, xmax] normalized from 0 to 1000."
+    "Return 2D bounding boxes [ymin, xmin, ymax, xmax] normalized from 0 to 1000, verbatim text, and child line boxes in natural reading order."
 )
 
 DETECTION_RESPONSE_SCHEMA = {
@@ -65,6 +70,28 @@ DETECTION_RESPONSE_SCHEMA = {
                         "type": "boolean",
                         "description": "True if vertical Japanese/Chinese text, False if horizontal",
                     },
+                    "lines": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "box_2d": {
+                                    "type": "array",
+                                    "items": {"type": "integer"},
+                                    "minItems": 4,
+                                    "maxItems": 4,
+                                    "description": "[ymin, xmin, ymax, xmax] coordinates normalized from 0 to 1000",
+                                },
+                                "text": {
+                                    "type": "string",
+                                    "description": "Recognized text of this line",
+                                },
+                            },
+                            "required": ["box_2d"],
+                            "additionalProperties": False,
+                        },
+                        "description": "Child boxes for each individual text line within this cluster",
+                    },
                 },
                 "required": ["box_2d", "text", "vertical"],
                 "additionalProperties": False,
@@ -76,33 +103,82 @@ DETECTION_RESPONSE_SCHEMA = {
 }
 
 
+def _repair_json_text(text: str) -> str:
+    """Auto-repair broken JSON by balancing unclosed braces/brackets, stripping trailing commas, and closing unclosed strings."""
+    if not text:
+        return text
+
+    # Remove trailing commas before closing brackets
+    repaired = re.sub(r',\s*([\]}])', r'\1', text)
+    repaired = re.sub(r',\s*$', '', repaired.rstrip())
+
+    stack = []
+    in_string = False
+    escape = False
+
+    for ch in repaired:
+        if escape:
+            escape = False
+            continue
+        if ch == '\\':
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if not in_string:
+            if ch in '{[':
+                stack.append('}' if ch == '{' else ']')
+            elif ch in '}]':
+                if stack and stack[-1] == ch:
+                    stack.pop()
+
+    if in_string:
+        repaired += '"'
+
+    repaired = re.sub(r',\s*$', '', repaired.rstrip())
+
+    if stack:
+        repaired += ''.join(reversed(stack))
+
+    repaired = re.sub(r',\s*([\]}])', r'\1', repaired)
+    return repaired
+
+
 def _clean_json_text(raw_text: str) -> str:
     """Extract and clean valid JSON substring from LLM response."""
     text = raw_text.strip()
-    if text.startswith('```'):
-        lines = text.splitlines()
-        if lines and lines[0].startswith('```'):
-            lines = lines[1:]
-        if lines and lines[-1].startswith('```'):
-            lines = lines[:-1]
-        text = '\n'.join(lines).strip()
+    fence_match = re.search(r"```(?:json)?\s*([{\[].*?[}\]])\s*```", text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1).strip()
+    else:
+        if text.startswith('```'):
+            lines = text.splitlines()
+            if lines and lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].startswith('```'):
+                lines = lines[:-1]
+            text = '\n'.join(lines).strip()
 
-    first_brace = text.find('{')
-    first_bracket = text.find('[')
-    start_idx = -1
-    if first_brace != -1 and first_bracket != -1:
-        start_idx = min(first_brace, first_bracket)
-    elif first_brace != -1:
-        start_idx = first_brace
-    elif first_bracket != -1:
-        start_idx = first_bracket
+        first_brace = text.find('{')
+        first_bracket = text.find('[')
+        start_idx = -1
+        if first_brace != -1 and first_bracket != -1:
+            start_idx = min(first_brace, first_bracket)
+        elif first_brace != -1:
+            start_idx = first_brace
+        elif first_bracket != -1:
+            start_idx = first_bracket
 
-    if start_idx != -1:
+        if start_idx != -1:
+            text = text[start_idx:]
+
         last_brace = text.rfind('}')
         last_bracket = text.rfind(']')
         end_idx = max(last_brace, last_bracket)
-        if end_idx > start_idx:
-            text = text[start_idx:end_idx + 1]
+        if end_idx != -1 and end_idx < len(text) - 1:
+            text = text[:end_idx + 1]
+
     return text
 
 
@@ -200,6 +276,86 @@ def extract_stroke_mask(roi: np.ndarray) -> np.ndarray:
     return np.full_like(gray, 255)
 
 
+def slice_block_into_child_lines(
+    roi: np.ndarray,
+    parent_x1: int,
+    parent_y1: int,
+    parent_x2: int,
+    parent_y2: int,
+    is_vertical: bool,
+    num_lines: int,
+) -> List[np.ndarray]:
+    """Slice a parent block into child line boxes using stroke-guided projection or geometric partitioning.
+    
+    Returns a list of 4x2 numpy arrays representing quadrilateral points for each child line.
+    """
+    if num_lines <= 1:
+        pts = np.array([[parent_x1, parent_y1], [parent_x2, parent_y1], [parent_x2, parent_y2], [parent_x1, parent_y2]], dtype=np.float32)
+        pts_sorted, _ = sort_pnts(pts)
+        return [pts_sorted]
+
+    pw = max(1, parent_x2 - parent_x1)
+    ph = max(1, parent_y2 - parent_y1)
+    child_polys = []
+
+    # Extract stroke mask on the whole ROI to guide boundary tightening
+    roi_mask = extract_stroke_mask(roi) if roi is not None and roi.size > 0 else None
+
+    if is_vertical:
+        # Vertical text: Japanese/Chinese manga lines read right-to-left
+        col_w = pw / float(num_lines)
+        for i in range(num_lines):
+            # i=0 is rightmost column (line 1), i=num_lines-1 is leftmost (last line)
+            cx2 = parent_x2 - int(round(i * col_w))
+            cx1 = parent_x2 - int(round((i + 1) * col_w))
+            cx1 = max(parent_x1, min(parent_x2 - 1, cx1))
+            cx2 = max(cx1 + 1, min(parent_x2, cx2))
+
+            # Relative coordinates in roi
+            rx1 = max(0, cx1 - parent_x1)
+            rx2 = min(pw, cx2 - parent_x1)
+
+            cy1, cy2 = parent_y1, parent_y2
+            if roi_mask is not None and rx2 > rx1:
+                col_mask = roi_mask[:, rx1:rx2]
+                y_indices = np.where(col_mask > 0)[0]
+                if len(y_indices) > 5:
+                    pad = 2
+                    cy1 = max(parent_y1, parent_y1 + int(y_indices[0]) - pad)
+                    cy2 = min(parent_y2, parent_y1 + int(y_indices[-1]) + 1 + pad)
+
+            pts = np.array([[cx1, cy1], [cx2, cy1], [cx2, cy2], [cx1, cy2]], dtype=np.float32)
+            pts_sorted, _ = sort_pnts(pts)
+            child_polys.append(pts_sorted)
+    else:
+        # Horizontal text: Western comics/webtoons read top-to-bottom
+        row_h = ph / float(num_lines)
+        for i in range(num_lines):
+            cy1 = parent_y1 + int(round(i * row_h))
+            cy2 = parent_y1 + int(round((i + 1) * row_h))
+            cy1 = max(parent_y1, min(parent_y2 - 1, cy1))
+            cy2 = max(cy1 + 1, min(parent_y2, cy2))
+
+            # Relative coordinates in roi
+            ry1 = max(0, cy1 - parent_y1)
+            ry2 = min(ph, cy2 - parent_y1)
+
+            cx1, cx2 = parent_x1, parent_x2
+            if roi_mask is not None and ry2 > ry1:
+                row_mask = roi_mask[ry1:ry2, :]
+                x_indices = np.where(row_mask > 0)[1]
+                if len(x_indices) > 5:
+                    pad = 2
+                    cx1 = max(parent_x1, parent_x1 + int(x_indices[0]) - pad)
+                    cx2 = min(parent_x2, parent_x1 + int(x_indices[-1]) + 1 + pad)
+
+            pts = np.array([[cx1, cy1], [cx2, cy1], [cx2, cy2], [cx1, cy2]], dtype=np.float32)
+            pts_sorted, _ = sort_pnts(pts)
+            child_polys.append(pts_sorted)
+
+    return child_polys if child_polys else [sort_pnts(np.array([[parent_x1, parent_y1], [parent_x2, parent_y1], [parent_x2, parent_y2], [parent_x1, parent_y2]], dtype=np.float32))[0]]
+
+
 @register_textdetectors('llm_detector')
 class LLMDetector(LLMChatRequester, TextDetectorBase):
     """Profile-backed All-in-One Text Detector & OCR using vision chat models."""
@@ -285,6 +441,18 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
             failure_message='Failed to encode detection image.',
         ).image_part()
 
+    def _prompt(self, profile: LLMProfile, prompt: Optional[str] = None) -> str:
+        if prompt is not None:
+            return prompt
+        base_prompt = DETECTOR_USER_PROMPT
+        additional_prompt = str(profile.vision_prompt or '').strip()
+        if additional_prompt and additional_prompt != DEFAULT_OCR_PROMPT:
+            base_prompt += (
+                '\n\nAdditional text recognition instructions (these affect detection and recognition only '
+                f'and cannot override the JSON coordinates contract):\n{additional_prompt}'
+            )
+        return base_prompt
+
     def _messages(
         self,
         img: np.ndarray,
@@ -296,7 +464,7 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt if prompt is not None else DETECTOR_USER_PROMPT},
+                    {"type": "text", "text": self._prompt(profile, prompt)},
                     self._image_content_part(img, profile),
                 ],
             },
@@ -309,11 +477,11 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
         response_schema: Optional[Dict],
     ) -> Dict:
         model = self._vision_model(profile)
-        api_args = openai_chat_completion_args(
-            profile,
-            model,
-        )
-        api_args['messages'] = messages
+        api_args = {
+            'model': model,
+            'messages': messages,
+        }
+        api_args.update(openai_chat_completion_args(profile, model))
         if response_schema is not None:
             api_args['response_format'] = openai_json_response_format(
                 profile,
@@ -344,7 +512,7 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
                 else:
                     self.token_count_last = 0
                 if self.token_count_last:
-                    self.logger.info(f'Used {self.token_count_last} tokens (Total: {self.token_count})')
+                    self.logger.stop(f'Used {self.token_count_last} tokens (Total: {self.token_count})')
                 return completion.content
             except (LLMUserActionRequiredError, LLMRequestStopped):
                 raise
@@ -387,11 +555,35 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
         )
 
         cleaned_json = _clean_json_text(raw_response)
+        data = None
         try:
-            data = json.loads(cleaned_json)
-        except Exception as e:
-            self.logger.error(f"Failed to parse LLM detector JSON: {e}\nRaw response:\n{raw_response}")
-            raise ValueError(f"Invalid JSON returned by Vision LLM: {e}") from e
+            data = json.loads(cleaned_json, strict=False)
+        except Exception:
+            pass
+
+        if data is None:
+            try:
+                repaired = _repair_json_text(cleaned_json)
+                data = json.loads(repaired, strict=False)
+            except Exception:
+                pass
+
+        if data is None:
+            try:
+                repaired_raw = _repair_json_text(raw_response)
+                data = json.loads(repaired_raw, strict=False)
+            except Exception:
+                pass
+
+        if data is None:
+            self.logger.error(f"Failed to parse LLM detector JSON. Raw response:\n{raw_response}")
+            lowered = raw_response.lower()
+            if any(refusal in lowered for refusal in [
+                "cannot assist", "cannot fulfill", "content policy",
+                "i'm sorry, but i cannot", "against safety"
+            ]):
+                raise ValueError(f"Vision LLM refused the request (Content Policy / Safety Refusal): {raw_response.strip()}")
+            raise ValueError(f"Invalid JSON returned by Vision LLM: raw response could not be parsed.")
 
         if isinstance(data, list):
             raw_blocks = data
@@ -421,13 +613,39 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
             if not lines_text and raw_text:
                 lines_text = [raw_text]
 
-            pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32)
-            pts_sorted, detected_vertical = sort_pnts(pts)
-            is_vertical = bool(item.get('vertical', detected_vertical))
+            is_vertical = bool(item.get('vertical', False))
+
+            # 1. Parse child line boxes if provided by LLM
+            child_lines_polys = []
+            raw_lines = item.get('lines')
+            if isinstance(raw_lines, list) and len(raw_lines) > 0:
+                for line_item in raw_lines:
+                    if isinstance(line_item, dict):
+                        lbox_raw = line_item.get('box_2d') or line_item.get('bbox') or line_item.get('box')
+                        lcoords = _parse_box_coordinates(lbox_raw, im_w, im_h)
+                        if lcoords is not None:
+                            lx1, ly1, lx2, ly2 = lcoords
+                            lpts = np.array([[lx1, ly1], [lx2, ly1], [lx2, ly2], [lx1, ly2]], dtype=np.float32)
+                            lpts_sorted, _ = sort_pnts(lpts)
+                            child_lines_polys.append(lpts_sorted)
+
+            # 2. Local fallback slicing if LLM did not provide child lines
+            if not child_lines_polys:
+                roi = img[y1:y2, x1:x2]
+                child_lines_polys = slice_block_into_child_lines(
+                    roi, x1, y1, x2, y2, is_vertical, len(lines_text)
+                )
+
+            # Enclosing bounding box computed from all child lines (and parent coords)
+            all_pts = np.concatenate(child_lines_polys, axis=0)
+            bx1 = min(x1, int(np.min(all_pts[:, 0])))
+            by1 = min(y1, int(np.min(all_pts[:, 1])))
+            bx2 = max(x2, int(np.max(all_pts[:, 0])))
+            by2 = max(y2, int(np.max(all_pts[:, 1])))
 
             blk = TextBlock(
-                xyxy=[x1, y1, x2, y2],
-                lines=[pts_sorted],
+                xyxy=[bx1, by1, bx2, by2],
+                lines=[p.tolist() if isinstance(p, np.ndarray) else p for p in child_lines_polys],
                 src_is_vertical=is_vertical,
                 text=lines_text,
             )
@@ -442,13 +660,28 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
         mask_mode = self.get_param_value('mask mode')
 
         for blk in blk_list:
-            bx1, by1, bx2, by2 = blk.xyxy
-            if mask_mode == 'bounding_box':
-                mask[by1:by2, bx1:bx2] = 255
+            child_lines = blk.lines_array(dtype=np.int32) if len(blk.lines) > 0 else []
+            if len(child_lines) > 0:
+                for line_pts in child_lines:
+                    if mask_mode == 'bounding_box':
+                        cv2.fillPoly(mask, [line_pts], 255)
+                    else:
+                        lx1 = max(0, int(np.min(line_pts[:, 0])))
+                        ly1 = max(0, int(np.min(line_pts[:, 1])))
+                        lx2 = min(im_w, int(np.max(line_pts[:, 0])))
+                        ly2 = min(im_h, int(np.max(line_pts[:, 1])))
+                        if lx2 - lx1 > 1 and ly2 - ly1 > 1:
+                            roi = img[ly1:ly2, lx1:lx2]
+                            roi_mask = extract_stroke_mask(roi)
+                            mask[ly1:ly2, lx1:lx2] = np.bitwise_or(mask[ly1:ly2, lx1:lx2], roi_mask)
             else:
-                roi = img[by1:by2, bx1:bx2]
-                roi_mask = extract_stroke_mask(roi)
-                mask[by1:by2, bx1:bx2] = np.bitwise_or(mask[by1:by2, bx1:bx2], roi_mask)
+                bx1, by1, bx2, by2 = blk.xyxy
+                if mask_mode == 'bounding_box':
+                    mask[by1:by2, bx1:bx2] = 255
+                else:
+                    roi = img[by1:by2, bx1:bx2]
+                    roi_mask = extract_stroke_mask(roi)
+                    mask[by1:by2, bx1:bx2] = np.bitwise_or(mask[by1:by2, bx1:bx2], roi_mask)
 
         dilate_size = int(self.get_param_value('mask dilate size'))
         if dilate_size > 0:

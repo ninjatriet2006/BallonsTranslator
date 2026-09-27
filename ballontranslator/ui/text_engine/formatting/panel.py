@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qtpy.QtCore import QElapsedTimer, QLocale, QModelIndex, QSignalBlocker, QTimer, Signal, Qt
+from qtpy.QtCore import QElapsedTimer, QLocale, QModelIndex, QSignalBlocker, QTimer, Signal, Qt, QSize
 from qtpy.QtGui import (
     QActionGroup,
     QColor,
@@ -860,6 +860,7 @@ class FontReloadButton(QToolButton):
 
 class FontFormatPanel(Widget):
     reload_fonts_requested = Signal()
+    apply_all_fontfmt = Signal(FontFormat)
     
     textblk_item: TextBlkItem = None
     text_cursor: QTextCursor = None
@@ -1080,16 +1081,36 @@ class FontFormatPanel(Widget):
         hl4.setContentsMargins(0, 11, 0, 0)
         hl4.setSpacing(0)
 
+        self.applyAllPagesBtn = QPushButton(self.tr("Apply to ALL pages..."), self)
+        self.applyAllPagesBtn.setObjectName("ApplyAllPagesFormatButton")
+        self.applyAllPagesBtn.setToolTip(self.tr("Apply current font formatting and visual effects to ALL pages in project"))
+        self.applyAllPagesBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        icon_path = themed_icon_path('replace-all.svg')
+        if icon_path:
+            self.applyAllPagesBtn.setIcon(QIcon(icon_path))
+            self.applyAllPagesBtn.setIconSize(QSize(16, 16))
+        self.applyAllPagesBtn.clicked.connect(self.on_apply_all_pages_clicked)
+
+        hl5 = QHBoxLayout()
+        hl5.addWidget(self.applyAllPagesBtn)
+        hl5.setContentsMargins(0, 8, 0, 0)
+
         self.vlayout.addLayout(vl0)
         self.vlayout.addLayout(hl1)
         self.vlayout.addLayout(hl3)
         self.vlayout.addLayout(hl2)
         self.vlayout.addLayout(hl4)
+        self.vlayout.addLayout(hl5)
         self.vlayout.setContentsMargins(0, 0, 6, 0)
         self.vlayout.setSpacing(0)
 
         self.focusOnColorDialog = False
         C.active_format = self.global_format
+
+    def on_apply_all_pages_clicked(self):
+        fmt = getattr(C, 'active_format', None) or self.global_format
+        if fmt is not None:
+            self.apply_all_fontfmt.emit(fmt)
 
     def global_mode(self):
         return id(C.active_format) == id(self.global_format)
