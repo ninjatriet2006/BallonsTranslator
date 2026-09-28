@@ -20,27 +20,50 @@ from ballontranslator.modules.exceptions import (
 from ballontranslator.utils.config import pcfg
 from ballontranslator.utils.llm_profiles import (
     DEFAULT_OCR_PROMPT,
+    DEFAULT_DETECTOR_BOX_PROMPT,
+    DEFAULT_DETECTOR_OCR_PROMPT,
     LLMProfile,
     runtime_profile,
 )
 from ballontranslator.utils.textblock import sort_regions, examine_textblk, sort_pnts
 
 
-DETECTOR_SYSTEM_PROMPT = (
-    "You are an expert manga and comic OCR and text detection engine.\n"
-    "Your task is to detect all text clusters (dialogue in speech balloons, narration boxes, "
-    "thought bubbles, sound effects, and side text) in the comic image and transcribe their exact original text.\n"
-    "Guidelines:\n"
-    "1. Detect separate bounding boxes for distinct speech bubbles; do not merge adjacent bubbles.\n"
-    "2. 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding the whole text bubble/cluster, normalized from 0 to 1000.\n"
-    "3. 'text': verbatim transcription of the visible text inside the box, preserving line breaks with \\n.\n"
-    "4. 'vertical': true if text is vertical (top-to-bottom), false if horizontal.\n"
-    "5. 'lines': optional list of tight child bounding boxes for each individual text line within the block. "
-    "Each child line has 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding only that line, and 'text'.\n"
-    "6. Order blocks and child lines according to natural comic reading order (top-to-bottom, right-to-left for manga).\n"
-    "Respond with pure JSON matching the schema: {\"blocks\": [{\"box_2d\": [...], \"text\": \"...\", \"vertical\": bool, \"lines\": [{\"box_2d\": [...]}]}]}. "
-    "Do not include any explanation or markdown wrappers."
-)
+def assemble_detector_system_prompt(
+    detector_box_prompt: Optional[str] = None,
+    detector_ocr_prompt: Optional[str] = None,
+) -> str:
+    box_guidelines = (
+        detector_box_prompt
+        if detector_box_prompt is not None and detector_box_prompt.strip()
+        else DEFAULT_DETECTOR_BOX_PROMPT
+    ).strip()
+    ocr_guidelines = (
+        detector_ocr_prompt
+        if detector_ocr_prompt is not None and detector_ocr_prompt.strip()
+        else DEFAULT_DETECTOR_OCR_PROMPT
+    ).strip()
+
+    return (
+        "You are an expert manga and comic OCR and text detection engine.\n"
+        "Your task is to detect all text clusters in the comic image and transcribe their exact original text.\n\n"
+        "Detection Guidelines:\n"
+        f"1. {box_guidelines}\n"
+        "2. Detect separate bounding boxes for distinct speech bubbles; do not merge adjacent bubbles.\n"
+        "3. 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding the whole text bubble/cluster, normalized from 0 to 1000.\n"
+        "4. 'lines': optional list of tight child bounding boxes for each individual text line within the block. "
+        "Each child line has 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding only that line, and 'text'.\n\n"
+        "Transcription Guidelines:\n"
+        f"1. {ocr_guidelines}\n"
+        "2. 'text': verbatim transcription of the visible text inside the box, preserving line breaks with \\n.\n"
+        "3. 'vertical': true if text is vertical (top-to-bottom), false if horizontal.\n\n"
+        "Output Format & Technical Rules:\n"
+        "- Order blocks and child lines according to natural comic reading order (top-to-bottom, right-to-left for manga).\n"
+        "- Respond with pure JSON matching the schema: {\"blocks\": [{\"box_2d\": [...], \"text\": \"...\", \"vertical\": bool, \"lines\": [{\"box_2d\": [...]}]}]}.\n"
+        "- Do not include any explanation or markdown wrappers."
+    )
+
+
+DETECTOR_SYSTEM_PROMPT = assemble_detector_system_prompt()
 
 DETECTOR_USER_PROMPT = (
     "Detect all text boxes and transcribe their text in this manga/comic page. "
@@ -461,7 +484,7 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
         if prompt is not None:
             return prompt
         base_prompt = DETECTOR_USER_PROMPT
-        additional_prompt = str(profile.vision_prompt or '').strip()
+        additional_prompt = str(getattr(profile, 'vision_prompt', None) or '').strip()
         if additional_prompt and additional_prompt != DEFAULT_OCR_PROMPT:
             base_prompt += (
                 '\n\nAdditional text recognition instructions (these affect detection and recognition only '
@@ -475,8 +498,18 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
         profile: LLMProfile,
         prompt: Optional[str] = None,
     ) -> List[Dict]:
+        box_prompt = getattr(profile, 'detector_box_prompt', None)
+        ocr_prompt = getattr(profile, 'detector_ocr_prompt', None)
+        if (
+            (not ocr_prompt or ocr_prompt == DEFAULT_DETECTOR_OCR_PROMPT)
+            and getattr(profile, 'vision_prompt', None)
+            and profile.vision_prompt != DEFAULT_OCR_PROMPT
+        ):
+            ocr_prompt = profile.vision_prompt
+
+        system_content = assemble_detector_system_prompt(box_prompt, ocr_prompt)
         return [
-            {"role": "system", "content": DETECTOR_SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": [

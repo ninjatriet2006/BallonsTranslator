@@ -149,12 +149,25 @@ DEFAULT_OCR_PROMPT = (
 )
 
 DEFAULT_INPAINT_PROMPT = (
-    "Clean up this comic or manga image for scanlation by removing all visible text elements. "
-    "Erase speech bubble dialogue, narration, captions, sound effects (SFX), and watermarks. "
-    "Seamlessly inpaint and reconstruct underlying artwork, line art, screentone patterns, textures, "
-    "and backgrounds behind erased text. Clean speech bubble interiors to match their original fill. "
-    "Preserve all character art, panel borders, lighting, and line details intact. "
-    "Do not add new text or blur artwork. Return only the cleaned image."
+    "Remove all text elements from this image, including dialogue, narration, captions, credits, titles, and author notes.\n\n"
+    "Strict Inpainting Rules:\n"
+    "1. Flat Background Priority: If the text is situated on a solid, empty, or plain background (such as pure white #FFFFFF), replace the erased text ONLY with the identical flat solid background color. Strictly DO NOT hallucinate, invent, or render any new artwork, character faces, line art, textures, or screentone patterns in these empty spaces.\n"
+    "2. Artwork Reconstruction: Only reconstruct underlying linework, screentones, and textures when text directly overlaps existing illustrations or panel borders. Match the original line weight and tone seamlessly.\n"
+    "3. Preserve Existing Art: Strictly keep all original character illustrations, panel borders, ink lines, and existing white margins 100% intact. Do not erase, blur, or alter any non-text elements.\n"
+    "4. Output: A clean scanlation-ready page with sharp linework and pristine, empty speech/text areas."
+)
+
+DEFAULT_DETECTOR_BOX_PROMPT = (
+    "Detect all text clusters including speech balloons, narration boxes, thought bubbles, "
+    "sound effects (SFX/onomatopoeia), titles, and side text. Bounding boxes must enclose the "
+    "full text and balloon area with a comfortable margin; strictly do not clip or truncate the "
+    "outer edges of speech bubbles or text strokes."
+)
+
+DEFAULT_DETECTOR_OCR_PROMPT = (
+    "Transcribe all visible text inside the box verbatim without translating, summarizing, "
+    "or omitting. If furigana (ruby text) is present, transcribe only the base characters. "
+    "Preserve original line breaks with \\n."
 )
 
 def _normal_url(url: str) -> str:
@@ -205,6 +218,8 @@ class LLMProfile(Config):
     thinking_level_options: List[str] = field(default_factory=lambda: list(THINKING_LEVEL_OPTIONS))
     prompt: str = DEFAULT_TRANSLATION_PROMPT
     vision_prompt: str = DEFAULT_OCR_PROMPT
+    detector_box_prompt: str = DEFAULT_DETECTOR_BOX_PROMPT
+    detector_ocr_prompt: str = DEFAULT_DETECTOR_OCR_PROMPT
     image_prompt: str = DEFAULT_INPAINT_PROMPT
     max_tokens: int = 8192
     temperature: float = 0.1

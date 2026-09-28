@@ -226,6 +226,48 @@ class TestLLMDetector(unittest.TestCase):
         # Explicit prompt overrides everything
         self.assertEqual(detector._prompt(profile, 'override'), 'override')
 
+    def test_detector_prompts_assembled(self):
+        from ballontranslator.modules.textdetector.detector_llm import (
+            assemble_detector_system_prompt,
+            DETECTOR_USER_PROMPT,
+        )
+        # Default prompt contains key guidelines and technical schema
+        default_sys = assemble_detector_system_prompt()
+        self.assertIn("Detection Guidelines:", default_sys)
+        self.assertIn("Transcription Guidelines:", default_sys)
+        self.assertIn("Output Format & Technical Rules:", default_sys)
+        self.assertIn("box_2d", default_sys)
+        self.assertIn("0 to 1000", default_sys)
+        self.assertIn("lines", default_sys)
+
+        # Custom prompts are cleanly injected into guidelines while keeping technical rules
+        custom_box = "Detect only big speech bubbles and ignore all SFX."
+        custom_ocr = "Transcribe with kanji and furigana separated by space."
+        custom_sys = assemble_detector_system_prompt(custom_box, custom_ocr)
+        self.assertIn(custom_box, custom_sys)
+        self.assertIn(custom_ocr, custom_sys)
+        self.assertIn("box_2d", custom_sys)
+        self.assertIn("Output Format & Technical Rules:", custom_sys)
+
+        # Verify LLMDetector._messages integrates custom profile prompts
+        profile = LLMProfile(
+            id='test_det_profile',
+            name='Test Det Profile',
+            support_vision=True,
+            vision_model='test-model',
+            vision_model_options=['test-model'],
+            detector_box_prompt=custom_box,
+            detector_ocr_prompt=custom_ocr,
+        )
+        detector = LLMDetector()
+        dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
+        messages = detector._messages(dummy_img, profile)
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn(custom_box, messages[0]["content"])
+        self.assertIn(custom_ocr, messages[0]["content"])
+        self.assertIn("0 to 1000", messages[0]["content"])
+
     def test_llm_child_lines_explicit(self):
         """When LLM provides child line boxes, blk.lines must use them."""
         profile = LLMProfile(

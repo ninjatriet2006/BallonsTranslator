@@ -45,6 +45,8 @@ from .module_parse_widgets import ParamWidget, SecretParamWidget
 from ballontranslator.utils.shared import size2width
 from ballontranslator.utils.config import pcfg
 from ballontranslator.utils.llm_profiles import (
+    DEFAULT_DETECTOR_BOX_PROMPT,
+    DEFAULT_DETECTOR_OCR_PROMPT,
     DEFAULT_INPAINT_PROMPT,
     DEFAULT_OCR_PROMPT,
     DEFAULT_TRANSLATION_PROMPT,
@@ -104,6 +106,10 @@ PROFILE_MODALITY_PARAM_DEFS = {
     'vision': [
         ('vision_detail_level', 'selector'),
         ('vision_prompt', 'editor'),
+    ],
+    'detector': [
+        ('detector_box_prompt', 'editor'),
+        ('detector_ocr_prompt', 'editor'),
     ],
     'image': [
         ('image_base_url', 'line_editor'),
@@ -348,7 +354,7 @@ class ProfileDetailsWidget(QWidget):
         prompt_width = max(
             (
                 self.param_widgets[key].minimumWidth()
-                for key in ('prompt', 'vision_prompt', 'image_prompt')
+                for key in ('prompt', 'vision_prompt', 'detector_box_prompt', 'detector_ocr_prompt', 'image_prompt')
                 if key in self.param_widgets
             ),
             default=0,
@@ -436,6 +442,8 @@ class ProfileCardWidget(QGroupBox):
             'json_schema_response_format': self.tr('JSON Schema Response'),
             'prompt': self.tr('Prompt'),
             'vision_prompt': self.tr('Prompt'),
+            'detector_box_prompt': self.tr('Detection Rules'),
+            'detector_ocr_prompt': self.tr('Transcription Rules'),
             'image_prompt': self.tr('Prompt'),
             'low_vram_mode': self.tr('Low VRAM Mode'),
         }
@@ -452,6 +460,8 @@ class ProfileCardWidget(QGroupBox):
             ),
             'prompt': self.tr('Additional translation instructions for style and wording.'),
             'vision_prompt': self.tr('Instructions sent to the vision model for OCR.'),
+            'detector_box_prompt': self.tr('Instructions for detecting text clusters, speech balloons, and SFX.'),
+            'detector_ocr_prompt': self.tr('Instructions for transcribing text (handling ruby/furigana, linebreaks).'),
             'image_prompt': self.tr('Instructions sent to the image model for cleanup.'),
             'concurrency': self.tr('Maximum concurrent worker threads for this profile (0 = follow global settings, >0 to override).'),
             'request_delay': self.tr('Minimum cooldown delay in seconds between requests for this profile (0 = follow global settings).'),
@@ -740,6 +750,7 @@ class ProfileCardWidget(QGroupBox):
             {
                 'text': (self.tr('Text'), self._detail_params(PROFILE_MODALITY_PARAM_DEFS['text'])),
                 'vision': (self.tr('Vision'), self._detail_params(PROFILE_MODALITY_PARAM_DEFS['vision'])),
+                'detector': (self.tr('Detector'), self._detail_params(PROFILE_MODALITY_PARAM_DEFS['detector'])),
                 'image': (self.tr('Image'), self._detail_params(PROFILE_MODALITY_PARAM_DEFS['image'])),
             },
             scrollWidget=scrollWidget,
@@ -783,7 +794,7 @@ class ProfileCardWidget(QGroupBox):
         thinking_combo = self.details.param_widgets.get('thinking_level')
         if isinstance(thinking_combo, ParamComboBox):
             self._syncComboBox(thinking_combo, self.profile.thinking_level_options, self.profile.thinking_level)
-        for key in ('prompt', 'vision_prompt', 'image_prompt'):
+        for key in ('prompt', 'vision_prompt', 'detector_box_prompt', 'detector_ocr_prompt', 'image_prompt'):
             editor = self.details.param_widgets.get(key)
             if isinstance(editor, QPlainTextEdit):
                 editor.blockSignals(True)
@@ -850,6 +861,10 @@ class ProfileCardWidget(QGroupBox):
                     default_val = DEFAULT_TRANSLATION_PROMPT
                 elif key == 'vision_prompt':
                     default_val = DEFAULT_OCR_PROMPT
+                elif key == 'detector_box_prompt':
+                    default_val = DEFAULT_DETECTOR_BOX_PROMPT
+                elif key == 'detector_ocr_prompt':
+                    default_val = DEFAULT_DETECTOR_OCR_PROMPT
                 elif key == 'image_prompt':
                     default_val = DEFAULT_INPAINT_PROMPT
                 params[key] = {
@@ -1715,6 +1730,7 @@ class ProfileCardWidget(QGroupBox):
         self.details.setParamVisible('low_vram_mode', not require_key)
         self.details.setSectionVisible('text', support_text)
         self.details.setSectionVisible('vision', support_vision)
+        self.details.setSectionVisible('detector', support_vision)
         self.details.setSectionVisible('image', support_image)
         self.refreshKeyStatus()
         self._sync_summary_grid()
