@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Sequence
+from typing import Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse, urlunparse
 
 import cv2
@@ -141,6 +141,46 @@ class _SharedLLMImageThrottle:
 
 
 _LLM_IMAGE_THROTTLE = _SharedLLMImageThrottle()
+
+
+def letterbox_image(img: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+    """Pad image symmetrically to 1:1 square aspect ratio using edge replication."""
+    h, w = img.shape[:2]
+    if h == w:
+        return img, (0, 0, 0, 0)
+    max_dim = max(h, w)
+    pad_top = (max_dim - h) // 2
+    pad_bottom = max_dim - h - pad_top
+    pad_left = (max_dim - w) // 2
+    pad_right = max_dim - w - pad_left
+    padded = cv2.copyMakeBorder(
+        img, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_REPLICATE
+    )
+    return padded, (pad_top, pad_bottom, pad_left, pad_right)
+
+
+def unletterbox_image(
+    result: np.ndarray,
+    pad_info: Tuple[int, int, int, int],
+    target_shape: Tuple[int, int],
+) -> np.ndarray:
+    """Crop out symmetric letterbox padding and restore original target shape."""
+    pad_top, pad_bottom, pad_left, pad_right = pad_info
+    target_h, target_w = target_shape
+    if pad_top == 0 and pad_bottom == 0 and pad_left == 0 and pad_right == 0:
+        if result.shape[:2] != (target_h, target_w):
+            return cv2.resize(result, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+        return result
+
+    # Resize result to the square coordinate frame
+    max_dim = max(target_h, target_w)
+    if result.shape[:2] != (max_dim, max_dim):
+        result = cv2.resize(result, (max_dim, max_dim), interpolation=cv2.INTER_LINEAR)
+
+    cropped = result[pad_top : pad_top + target_h, pad_left : pad_left + target_w]
+    if cropped.shape[:2] != (target_h, target_w):
+        cropped = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    return cropped
 
 
 class LLMImageRequester:
@@ -709,14 +749,20 @@ class LLMImageRequester:
         model: Optional[str] = None,
         *,
         resize_to_input: bool = False,
+        preserve_aspect_ratio: bool = False,
     ) -> np.ndarray:
         """Return one generated RGB(A) image for optional input context."""
         if self.stop_event is not None and self.stop_event.is_set():
             raise LLMRequestStopped()
         client = self._initialize_client(profile)
         original_shape = None if image is None else image.shape[:2]
+        pad_info = (0, 0, 0, 0)
+        input_image = image
+        if preserve_aspect_ratio and image is not None:
+            input_image, pad_info = letterbox_image(image)
+
         request_image = (
-            None if image is None else self._scale_image_for_request(image)
+            None if input_image is None else self._scale_image_for_request(input_image)
         )
         image_file = (
             None
@@ -749,13 +795,15 @@ class LLMImageRequester:
             if (
                 resize_to_input
                 and original_shape is not None
-                and result.shape[:2] != original_shape
             ):
-                result = cv2.resize(
-                    result,
-                    (original_shape[1], original_shape[0]),
-                    interpolation=cv2.INTER_LINEAR,
-                )
+                if preserve_aspect_ratio and pad_info != (0, 0, 0, 0):
+                    result = unletterbox_image(result, pad_info, original_shape)
+                elif result.shape[:2] != original_shape:
+                    result = cv2.resize(
+                        result,
+                        (original_shape[1], original_shape[0]),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
             return np.ascontiguousarray(result.astype(np.uint8, copy=False))
         finally:
             if image_file is not None:
@@ -768,7 +816,11 @@ class LLMImageRequester:
         prompt: Optional[str] = None,
     ) -> np.ndarray:
         result = self.request_image(
-            profile, img, prompt=prompt, resize_to_input=True
+            profile,
+            img,
+            prompt=prompt,
+            resize_to_input=True,
+            preserve_aspect_ratio=True,
         )
         channels = img.shape[2]
         if result.shape[2] != channels:

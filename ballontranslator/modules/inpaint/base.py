@@ -16,8 +16,12 @@ register_inpainter = INPAINTERS.register_module
 # Keep this file limited to shared base logic; concrete inpainters live elsewhere.
 
 
-def filter_mask_by_bboxes(mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
-    """Keep mask pixels inside detected text block rects, with a small margin.
+def filter_mask_by_bboxes(
+    mask: np.ndarray,
+    textblock_list: List[TextBlock] = None,
+    margin: int = 10,
+) -> np.ndarray:
+    """Keep mask pixels inside detected text block rects, with a safety margin.
 
     Example:
         >>> mask = np.full((4, 5), 255, dtype=np.uint8)
@@ -31,7 +35,11 @@ def filter_mask_by_bboxes(mask: np.ndarray, textblock_list: List[TextBlock] = No
 
     rect_mask = np.zeros_like(mask)
     for blk in textblock_list:
-        x1, y1, bbox_w, bbox_h = np.array(blk.bounding_rect()).astype(np.int64)
+        try:
+            x1, y1, bbox_w, bbox_h = np.array(blk.bounding_rect()).astype(np.int64)
+        except Exception:
+            bx1, by1, bx2, by2 = blk.xyxy
+            x1, y1, bbox_w, bbox_h = int(bx1), int(by1), int(bx2 - bx1), int(by2 - by1)
         y2, x2 = y1 + bbox_h, x1 + bbox_w
         if bbox_w <= 0 or bbox_h <= 0:
             continue
@@ -42,7 +50,9 @@ def filter_mask_by_bboxes(mask: np.ndarray, textblock_list: List[TextBlock] = No
         cv2.fillPoly(rect_mask, [rect], 255)
         cv2.polylines(rect_mask, [rect], True, 255, 1)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    safe_margin = max(2, int(margin))
+    ksize = safe_margin * 2 + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
     rect_mask = cv2.dilate(rect_mask, kernel)
     return cv2.bitwise_and(mask, rect_mask)
 

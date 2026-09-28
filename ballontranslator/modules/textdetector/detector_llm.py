@@ -262,7 +262,55 @@ def _parse_box_coordinates(
     return x1, y1, x2, y2
 
 
-def extract_stroke_mask(roi: np.ndarray) -> np.ndarray:
+def is_flat_background(roi: np.ndarray, std_thresh: float = 14.0) -> bool:
+    """Check if ROI has a flat/uniform background (such as a speech balloon or solid box)."""
+    if roi is None or roi.size == 0 or roi.shape[0] < 2 or roi.shape[1] < 2:
+        return False
+    try:
+        roi = np.ascontiguousarray(roi)
+        if roi.ndim == 3:
+            channels = roi.shape[2]
+            if channels == 4:
+                gray = cv2.cvtColor(roi, cv2.COLOR_RGBA2GRAY)
+            elif channels == 3:
+                gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = roi[:, :, 0]
+        elif roi.ndim == 2:
+            gray = roi
+        else:
+            return False
+
+        border = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
+        border_std = float(np.std(border))
+        border_median = float(np.median(border))
+
+        # Check 4 corners of ROI (almost universally flat background in speech bubbles)
+        c_h = min(3, max(1, gray.shape[0] // 2))
+        c_w = min(3, max(1, gray.shape[1] // 2))
+        corners = np.concatenate([
+            gray[:c_h, :c_w].ravel(),
+            gray[:c_h, -c_w:].ravel(),
+            gray[-c_h:, :c_w].ravel(),
+            gray[-c_h:, -c_w:].ravel(),
+        ])
+        corner_median = float(np.median(corners))
+        corner_std = float(np.std(corners))
+        if corner_median >= 230.0 and corner_std < 20.0:
+            return True
+
+        # Pure white/light speech bubbles: very high median (>230) and low std (<22)
+        if border_median >= 230.0 and border_std < 22.0:
+            return True
+        # Solid flat background of any tone: border_std < std_thresh
+        if border_std < std_thresh:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def extract_stroke_mask(roi: np.ndarray, dilate_pixels: int = 0) -> np.ndarray:
     """Extract fine text stroke mask inside a bounding box to avoid wiping background artwork."""
     if roi is None or roi.size == 0 or roi.shape[0] < 2 or roi.shape[1] < 2:
         h = 1 if roi is None or roi.shape[0] < 1 else roi.shape[0]
@@ -300,17 +348,26 @@ def extract_stroke_mask(roi: np.ndarray) -> np.ndarray:
         fg_ratio = np.count_nonzero(otsu_mask) / max(1, total_pixels)
 
         if 0.03 <= fg_ratio <= 0.65:
-            return otsu_mask
+            res_mask = otsu_mask
+        else:
+            ad_mask = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                thresh_type, 15, 8
+            )
+            ad_ratio = np.count_nonzero(ad_mask) / max(1, total_pixels)
+            if 0.03 <= ad_ratio <= 0.70:
+                res_mask = ad_mask
+            else:
+                res_mask = np.full_like(gray, 255)
 
-        ad_mask = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            thresh_type, 15, 8
-        )
-        ad_ratio = np.count_nonzero(ad_mask) / max(1, total_pixels)
-        if 0.03 <= ad_ratio <= 0.70:
-            return ad_mask
+        if dilate_pixels > 0:
+            k = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE,
+                (2 * dilate_pixels + 1, 2 * dilate_pixels + 1),
+            )
+            res_mask = cv2.dilate(res_mask, k)
 
-        return np.full_like(gray, 255)
+        return res_mask
     except Exception:
         return np.full((roi.shape[0], roi.shape[1]), 255, dtype=np.uint8)
 
@@ -429,15 +486,15 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
         },
         'mask mode': {
             'type': 'selector',
-            'options': ['adaptive_stroke', 'bounding_box'],
-            'value': 'adaptive_stroke',
+            'options': ['smart_hybrid', 'adaptive_stroke', 'bounding_box'],
+            'value': 'smart_hybrid',
             'display_name': 'Mask Mode',
-            'description': 'adaptive_stroke extracts letter strokes; bounding_box fills the whole box.',
+            'description': 'smart_hybrid fills flat/speech bubbles and extracts strokes on art; adaptive_stroke extracts strokes; bounding_box fills box.',
         },
         'mask dilate size': {
             'value': 3,
             'display_name': 'Mask Dilate Size',
-            'description': 'Pixel dilation applied to the inpainting mask.',
+            'description': 'Base pixel dilation applied to the inpainting mask (scales adaptively with resolution).',
         },
         'proxy': {
             'value': '',
@@ -707,21 +764,27 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
 
         mask = np.zeros((im_h, im_w), dtype=np.uint8)
         mask_mode = self.get_param_value('mask mode')
+        base_dilate = max(0, int(self.get_param_value('mask dilate size')))
 
         for blk in blk_list:
             child_lines = blk.lines_array(dtype=np.int32) if len(blk.lines) > 0 else []
             if len(child_lines) > 0:
                 for line_pts in child_lines:
+                    lx1 = max(0, int(np.min(line_pts[:, 0])))
+                    ly1 = max(0, int(np.min(line_pts[:, 1])))
+                    lx2 = min(im_w, int(np.max(line_pts[:, 0])))
+                    ly2 = min(im_h, int(np.max(line_pts[:, 1])))
                     if mask_mode == 'bounding_box':
                         cv2.fillPoly(mask, [line_pts], 255)
-                    else:
-                        lx1 = max(0, int(np.min(line_pts[:, 0])))
-                        ly1 = max(0, int(np.min(line_pts[:, 1])))
-                        lx2 = min(im_w, int(np.max(line_pts[:, 0])))
-                        ly2 = min(im_h, int(np.max(line_pts[:, 1])))
-                        if lx2 - lx1 > 1 and ly2 - ly1 > 1:
-                            roi = img[ly1:ly2, lx1:lx2]
-                            roi_mask = extract_stroke_mask(roi)
+                    elif lx2 - lx1 > 1 and ly2 - ly1 > 1:
+                        roi = img[ly1:ly2, lx1:lx2]
+                        if mask_mode == 'smart_hybrid' and is_flat_background(roi):
+                            cv2.fillPoly(mask, [line_pts], 255)
+                        else:
+                            line_dim = min(max(1, ly2 - ly1), max(1, lx2 - lx1))
+                            local_dilate = max(base_dilate, int(round(line_dim * 0.06))) if base_dilate > 0 else 0
+                            local_dilate = min(local_dilate, 10)
+                            roi_mask = extract_stroke_mask(roi, dilate_pixels=local_dilate)
                             target_slice = mask[ly1:ly2, lx1:lx2]
                             if roi_mask.shape == target_slice.shape:
                                 mask[ly1:ly2, lx1:lx2] = np.bitwise_or(target_slice, roi_mask)
@@ -731,22 +794,28 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
                 bx1, by1, bx2, by2 = blk.xyxy
                 if mask_mode == 'bounding_box':
                     mask[by1:by2, bx1:bx2] = 255
-                else:
-                    if bx2 - bx1 > 1 and by2 - by1 > 1:
-                        roi = img[by1:by2, bx1:bx2]
-                        roi_mask = extract_stroke_mask(roi)
+                elif bx2 - bx1 > 1 and by2 - by1 > 1:
+                    roi = img[by1:by2, bx1:bx2]
+                    if mask_mode == 'smart_hybrid' and is_flat_background(roi):
+                        mask[by1:by2, bx1:bx2] = 255
+                    else:
+                        block_dim = min(max(1, by2 - by1), max(1, bx2 - bx1))
+                        local_dilate = max(base_dilate, int(round(block_dim * 0.05))) if base_dilate > 0 else 0
+                        local_dilate = min(local_dilate, 10)
+                        roi_mask = extract_stroke_mask(roi, dilate_pixels=local_dilate)
                         target_slice = mask[by1:by2, bx1:bx2]
                         if roi_mask.shape == target_slice.shape:
                             mask[by1:by2, bx1:bx2] = np.bitwise_or(target_slice, roi_mask)
                         else:
                             mask[by1:by2, bx1:bx2] = 255
 
-        dilate_size = int(self.get_param_value('mask dilate size'))
-        if dilate_size > 0:
+        if base_dilate > 0:
+            page_scale = max(im_h, im_w) / 1000.0
+            final_dilate = max(base_dilate, int(round(base_dilate * min(page_scale, 2.0))))
             element = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE,
-                (2 * dilate_size + 1, 2 * dilate_size + 1),
-                (dilate_size, dilate_size),
+                (2 * final_dilate + 1, 2 * final_dilate + 1),
+                (final_dilate, final_dilate),
             )
             mask = cv2.dilate(mask, element)
 
