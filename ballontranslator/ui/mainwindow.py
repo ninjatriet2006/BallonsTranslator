@@ -852,19 +852,10 @@ class MainWindow(mainwindow_cls):
             create_error_dialog(e, self.tr('Failed to load project from') + json_path)
         
     def updatePageList(self):
-        if self.pageList.count() != 0:
-            self.pageList.clear()
-        if len(self.imgtrans_proj.pages) >= shared.PAGELIST_THUMBNAIL_MAXNUM:
-            item_func = lambda imgname: QListWidgetItem(imgname)
-        else:
-            item_func = lambda imgname:\
-                QListWidgetItem(QIcon(osp.join(self.imgtrans_proj.directory, imgname)), imgname)
-        for imgname in self.imgtrans_proj.pages:
-            lstitem =  item_func(imgname)
-            self.pageList.addItem(lstitem)
-            if imgname == self.imgtrans_proj.current_img:
-                self.pageList.setCurrentItem(lstitem)
-        self.llmContextEditor.set_project(self.imgtrans_proj)
+        if not hasattr(self, '_page_controller'):
+            from ballontranslator.ui.controllers.page_controller import PageNavigationController
+            self._page_controller = PageNavigationController(self)
+        self._page_controller.update_page_list()
 
     def _set_left_panel_content(
         self,
@@ -883,15 +874,10 @@ class MainWindow(mainwindow_cls):
         )
 
     def pageLabelStateChanged(self) -> None:
-        setup = self.leftBar.showPageListLabel.isChecked()
-        if setup:
-            if self.leftBar.globalSearchChecker.isChecked():
-                self.leftBar.globalSearchChecker.setChecked(False)
-            self._set_left_panel_content(self.pageList)
-        else:
-            self._set_left_panel_content(None)
-        pcfg.show_page_list = setup
-        save_config()
+        if not hasattr(self, '_page_controller'):
+            from ballontranslator.ui.controllers.page_controller import PageNavigationController
+            self._page_controller = PageNavigationController(self)
+        self._page_controller.handle_page_label_state_changed()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.font_change_detector is not None:
@@ -973,105 +959,16 @@ class MainWindow(mainwindow_cls):
             self.saveCurrentPage(update_scene_text, save_proj, restore_interface=True, save_rst_only=save_rst_only, keep_exist_as_backup=keep_exist_as_backup)
 
     def pageListCurrentItemChanged(self):
-        item = self.pageList.currentItem()
-        self.page_changing = True
-        if item is not None:
-            if not self.opening_dir:
-                # Typed transform edits belong to the old page and must commit
-                # before its dirty check. Live drags are previews and cancel.
-                self.st_manager.formatpanel.resolve_text_transform_edits_for_page_change()
-            if self.save_on_page_changed:
-                self.conditional_save()
-            self.st_manager.clearSceneTextitems(
-                SceneTextReplacementReason.PAGE_CHANGE
-            )
-            self.imgtrans_proj.set_current_img(item.text())
-            self.llmContextEditor.set_page(item.text())
-            self.canvas.clear_undostack(update_saved_step=True)
-            self.canvas.updateCanvas()
-            self.st_manager.populateSceneTextitems()
-            self.titleBar.setTitleContent(page_name=self.imgtrans_proj.current_img)
-            self.module_manager.handle_page_changed()
-            self.drawingPanel.handle_page_changed()
-            
-        self.page_changing = False
+        if not hasattr(self, '_page_controller'):
+            from ballontranslator.ui.controllers.page_controller import PageNavigationController
+            self._page_controller = PageNavigationController(self)
+        self._page_controller.handle_current_item_changed()
 
     def setupShortcuts(self):
-        self.titleBar.nextpage_trigger.connect(self.shortcutNext) 
-        self.titleBar.prevpage_trigger.connect(self.shortcutBefore)
-        self.titleBar.textedit_trigger.connect(self.shortcutTextedit)
-        self.titleBar.drawboard_trigger.connect(self.shortcutDrawboard)
-        self.titleBar.redo_trigger.connect(self.on_redo)
-        self.titleBar.undo_trigger.connect(self.on_undo)
-        self.titleBar.page_search_trigger.connect(self.on_page_search)
-        self.titleBar.global_search_trigger.connect(self.on_global_search)
-        self.titleBar.replacePreMTkeyword_trigger.connect(self.show_pre_MT_keyword_window)
-        self.titleBar.replaceMTkeyword_trigger.connect(self.show_MT_keyword_window)
-        self.titleBar.replaceOCRkeyword_trigger.connect(self.show_OCR_keyword_window)
-        self.titleBar.show_module.connect(self.on_show_module)
-        self.titleBar.importtstyle_trigger.connect(self.import_tstyles)
-        self.titleBar.exporttstyle_trigger.connect(self.export_tstyles)
-        self.titleBar.darkmode_trigger.connect(self.on_darkmode_triggered)
-        self.titleBar.merge_tool_trigger.connect(self.on_open_merge_tool)
-        self.titleBar.ps_bridge_trigger.connect(self.on_open_photoshop_bridge)
-        self.titleBar.path_reorder_trigger.connect(self.on_path_reorder)
-        self.canvas.path_reorder_mode_changed.connect(
-            self.titleBar.path_reorder_action.setChecked
-        )
-        self.titleBar.font_exclusion_trigger.connect(
-            self.configPanel.show_font_exclusion_dialog
-        )
+        from ballontranslator.ui.controllers.action_registry import ActionRegistry
+        self._action_registry = ActionRegistry(self)
+        self._action_registry.setup_shortcuts()
 
-        shortcutA = QShortcut(QKeySequence("A"), self)
-        shortcutA.activated.connect(self.shortcutBefore)
-        shortcutPageUp = QShortcut(QKeySequence(QKeySequence.StandardKey.MoveToPreviousPage), self)
-        shortcutPageUp.activated.connect(self.shortcutBefore)
-
-        shortcutD = QShortcut(QKeySequence("D"), self)
-        shortcutD.activated.connect(self.shortcutNext)
-        shortcutPageDown = QShortcut(QKeySequence(QKeySequence.StandardKey.MoveToNextPage), self)
-        shortcutPageDown.activated.connect(self.shortcutNext)
-
-        shortcutTextblock = QShortcut(QKeySequence("W"), self)
-        shortcutTextblock.activated.connect(self.shortcutTextblock)
-        shortcutZoomIn = QShortcut(QKeySequence.StandardKey.ZoomIn, self)
-        shortcutZoomIn.activated.connect(self.canvas.gv.scale_up_signal)
-        shortcutZoomOut = QShortcut(QKeySequence.StandardKey.ZoomOut, self)
-        shortcutZoomOut.activated.connect(self.canvas.gv.scale_down_signal)
-        shortcutCtrlD = QShortcut(QKeySequence("Ctrl+D"), self)
-        shortcutCtrlD.activated.connect(self.shortcutCtrlD)
-        shortcutSpace = QShortcut(QKeySequence("Space"), self)
-        shortcutSpace.activated.connect(self.shortcutSpace)
-        shortcutSelectAll = QShortcut(QKeySequence.StandardKey.SelectAll, self)
-        shortcutSelectAll.activated.connect(self.shortcutSelectAll)
-
-        shortcutEscape = QShortcut(QKeySequence("Escape"), self)
-        shortcutEscape.activated.connect(self.shortcutEscape)
-
-        shortcutBold = QShortcut(QKeySequence.StandardKey.Bold, self)
-        shortcutBold.activated.connect(self.shortcutBold)
-        shortcutItalic = QShortcut(QKeySequence.StandardKey.Italic, self)
-        shortcutItalic.activated.connect(self.shortcutItalic)
-        shortcutUnderline = QShortcut(QKeySequence.StandardKey.Underline, self)
-        shortcutUnderline.activated.connect(self.shortcutUnderline)
-        shortcutCapitalize = QShortcut(QKeySequence("Ctrl+Q"), self)
-        shortcutCapitalize.activated.connect(
-            self.st_manager.capitalize_selected_textitems
-        )
-
-        shortcutDelete = QShortcut(QKeySequence.StandardKey.Delete, self)
-        shortcutDelete.activated.connect(self.shortcutDelete)
-
-        drawpanel_shortcuts = {'hand': 'H', 'rect': 'R', 'inpaint': 'J', 'pen': 'B'}
-        for tool_name, shortcut_key in drawpanel_shortcuts.items():
-            shortcut = QShortcut(QKeySequence(shortcut_key), self)
-            key = getattr(QKEY, f'Key_{shortcut_key}')
-            shortcut.activated.connect(partial(
-                self.drawingPanel.shortcutSetCurrentToolByName,
-                tool_name,
-                key,
-            ))
-            self.drawingPanel.setShortcutTip(tool_name, shortcut_key)
 
     def shortcutNext(self):
         sender: QShortcut = self.sender()
