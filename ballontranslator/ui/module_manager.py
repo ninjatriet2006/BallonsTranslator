@@ -819,6 +819,7 @@ class ImgtransThread(QThread):
     ocr_counter = 0
     translate_counter = 0
     inpaint_counter = 0
+    num_pages = 0
 
     def __init__(self, 
                  textdetect_thread: TextDetectThread,
@@ -835,6 +836,7 @@ class ImgtransThread(QThread):
         self.inpaint_thread = inpaint_thread
         self.job = None
         self.imgtrans_proj: ProjImgTrans = None
+        self.num_pages = 0
         self.stop_event = threading.Event()
         self._pipeline_stop_emitted = False
         self.pages_to_process = None
@@ -1495,20 +1497,30 @@ class ImgtransThread(QThread):
                 self.translate_counter += 1
                 self.update_translate_progress.emit(self.translate_counter)
 
+        if self.parallel_trans and cfg_module.enable_translate and not self.isStopRequested():
+            while not self.translate_thread.pipeline_finished() and not self.isStopRequested():
+                if not self.translate_thread.isRunning():
+                    break
+                self.stop_event.wait(0.05)
+            if self.translate_thread.isRunning():
+                self.translate_thread.wait(2000)
+            self.translate_counter = self.translate_thread.finished_counter
+
         self._emit_pipeline_stopped_if_ready(imgtrans_running=False)
 
     def detect_finished(self) -> bool:
-        if self.imgtrans_proj is None:
+        if self.imgtrans_proj is None or getattr(self, 'num_pages', 0) == 0:
             return True
         return self.detect_counter == self.num_pages or not cfg_module.enable_detect
 
     def ocr_finished(self) -> bool:
-        if self.imgtrans_proj is None:
+        if self.imgtrans_proj is None or getattr(self, 'num_pages', 0) == 0:
             return True
         return self.ocr_counter == self.num_pages or not cfg_module.enable_ocr
 
     def translate_finished(self) -> bool:
         if self.imgtrans_proj is None \
+            or getattr(self, 'num_pages', 0) == 0 \
             or not cfg_module.enable_ocr \
             or not cfg_module.enable_translate:
             return True
@@ -1518,7 +1530,7 @@ class ImgtransThread(QThread):
         return self.translate_counter == self.num_pages or not cfg_module.enable_translate
 
     def inpaint_finished(self) -> bool:
-        if self.imgtrans_proj is None or not cfg_module.enable_inpaint:
+        if self.imgtrans_proj is None or getattr(self, 'num_pages', 0) == 0 or not cfg_module.enable_inpaint:
             return True
         return self.inpaint_counter == self.num_pages or not cfg_module.enable_inpaint
 
@@ -1857,7 +1869,7 @@ class ModuleManager(QObject):
     ) -> bool:
         command_preview = create_package_manager().preview_command(requirements)
         msgbox = QMessageBox()
-        msgbox.setIcon(QMessageBox.Question)
+        msgbox.setIcon(QMessageBox.Icon.Question if hasattr(QMessageBox, 'Icon') else QMessageBox.Question)
         msgbox.setWindowTitle(self.tr('Missing packages'))
         msgbox.setText(
             self.tr('Selected modules require missing package(s):\n{modules}').format(
@@ -1866,8 +1878,8 @@ class ModuleManager(QObject):
         )
         msgbox.setInformativeText(self.tr('Install the missing package(s) now?'))
         msgbox.setDetailedText(command_preview)
-        install_btn = msgbox.addButton(self.tr('Install'), QMessageBox.AcceptRole)
-        msgbox.addButton(self.tr('Not Now'), QMessageBox.RejectRole)
+        install_btn = msgbox.addButton(self.tr('Install'), QMessageBox.ButtonRole.AcceptRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.AcceptRole)
+        msgbox.addButton(self.tr('Not Now'), QMessageBox.ButtonRole.RejectRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.RejectRole)
         auto_install_checker = QCheckBox(self.tr("Install all missing packages and don't show again"))
         msgbox.setCheckBox(auto_install_checker)
         msgbox.exec()
@@ -2156,7 +2168,7 @@ class ModuleManager(QObject):
     def _ask_install_missing_packages(self, thread: ModuleThread, requirements: List[str]) -> bool:
         command_preview = create_package_manager().preview_command(requirements)
         msgbox = QMessageBox()
-        msgbox.setIcon(QMessageBox.Question)
+        msgbox.setIcon(QMessageBox.Icon.Question if hasattr(QMessageBox, 'Icon') else QMessageBox.Question)
         msgbox.setWindowTitle(self.tr('Missing packages'))
         msgbox.setText(
             self.tr('Module "{module}" requires missing package(s):\n{packages}').format(
@@ -2166,8 +2178,8 @@ class ModuleManager(QObject):
         )
         msgbox.setInformativeText(self.tr('Install the missing package(s) now?'))
         msgbox.setDetailedText(command_preview)
-        install_btn = msgbox.addButton(self.tr('Install'), QMessageBox.AcceptRole)
-        msgbox.addButton(self.tr('Not Now'), QMessageBox.RejectRole)
+        install_btn = msgbox.addButton(self.tr('Install'), QMessageBox.ButtonRole.AcceptRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.AcceptRole)
+        msgbox.addButton(self.tr('Not Now'), QMessageBox.ButtonRole.RejectRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.RejectRole)
         auto_install_checker = QCheckBox(self.tr("Install all missing packages and don't show again"))
         msgbox.setCheckBox(auto_install_checker)
         msgbox.exec()
@@ -2459,7 +2471,12 @@ class ModuleManager(QObject):
             if cfg_module.enable_ocr:
                 stats.append(f"OCR: {self.imgtrans_thread.ocr_counter}")
             if cfg_module.enable_translate:
-                stats.append(f"Translate: {self.imgtrans_thread.translate_counter}")
+                trans_count = (
+                    self.translate_thread.finished_counter
+                    if getattr(self.imgtrans_thread, 'parallel_trans', False)
+                    else self.imgtrans_thread.translate_counter
+                )
+                stats.append(f"Translate: {trans_count}")
             if cfg_module.enable_inpaint:
                 stats.append(f"Inpaint: {self.imgtrans_thread.inpaint_counter}")
             stats_str = f" | Stats: {', '.join(stats)}" if stats else ""

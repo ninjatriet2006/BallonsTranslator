@@ -66,10 +66,10 @@ def ndarray2pixmap(img, return_qimg=False):
     else:
         img_format = QImage.Format.Format_RGB888
     img = np.ascontiguousarray(img)
-    qImg = QImage(img.data, width, height, bytesPerLine, img_format)
+    qImg = QImage(img.data, width, height, bytesPerLine, img_format).copy()
     if return_qimg:
         return qImg
-    return QPixmap(qImg)
+    return QPixmap.fromImage(qImg)
 
 
 span_pattern = re.compile(r'<span style=\"(.*?)\">', re.DOTALL)

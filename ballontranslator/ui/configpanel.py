@@ -1682,9 +1682,11 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
 
     def on_open_onstartup_changed(self):
         pcfg.open_recent_on_startup = self.open_on_startup_checker.isChecked()
+        self.save_config.emit()
 
     def on_check_update_onstartup_changed(self):
         pcfg.check_update_on_startup = self.check_update_on_startup_checker.isChecked()
+        self.save_config.emit()
 
     def on_spellcheck_changed(self):
         enabled = self.spellcheck_checker.isChecked()
@@ -2010,8 +2012,7 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
     def setupConfig(self):
         self.blockSignals(True)
 
-        if pcfg.open_recent_on_startup:
-            self.open_on_startup_checker.setChecked(True)
+        self.open_on_startup_checker.setChecked(bool(pcfg.open_recent_on_startup))
         self.check_update_on_startup_checker.setChecked(pcfg.check_update_on_startup)
         
         # Setup repository dictionaries

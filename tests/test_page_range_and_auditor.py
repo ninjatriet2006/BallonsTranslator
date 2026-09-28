@@ -189,6 +189,86 @@ class PageRangeAndAuditorTests(unittest.TestCase):
         self.assertEqual(len(manager.pipeline_issues), 0)
         self.assertEqual(received_counts[-1], 0)
 
+    def test_llm_action_required_dialogs_compatibility(self):
+        from unittest.mock import MagicMock, patch
+        from PyQt6.QtWidgets import QWidget
+        from ballontranslator.ui.mainwindow import MainWindow
+
+        class DummyWindow(QWidget):
+            def tr(self, s):
+                return s
+            def focus_llm_profile(self, *a, **k):
+                pass
+
+        dummy_window = DummyWindow()
+
+        with patch('ballontranslator.ui.mainwindow.QMessageBox.exec') as mock_exec:
+            mock_exec.return_value = None
+
+            # Test on_show_llm_key_dialog
+            MainWindow.on_show_llm_key_dialog(dummy_window, 'test_profile', 'Test Profile')
+
+            # Test on_show_llm_model_dialog
+            MainWindow.on_show_llm_model_dialog(dummy_window, 'test_profile', 'Test Profile', 'image_model')
+
+            # Test on_show_llm_base_url_dialog (the exact method that aborted)
+            MainWindow.on_show_llm_base_url_dialog(dummy_window, 'test_profile', 'Test Profile', 'image_base_url')
+
+            self.assertEqual(mock_exec.call_count, 3)
+
+
+class TestAgnesImageRequester(unittest.TestCase):
+    def test_agnes_endpoint_and_payload(self):
+        from ballontranslator.modules.llm_image import LLMImageRequester
+        from ballontranslator.utils.llm_profiles import LLMProfile
+        import numpy as np
+
+        profile = LLMProfile(
+            id='agnes-test',
+            name='Agnes AI',
+            base_url='https://apihub.agnes-ai.com/v1',
+            image_model='agnes-image-2.0-flash',
+            image_model_options=['agnes-image-2.0-flash'],
+            require_api_key=False,
+        )
+
+        requester = LLMImageRequester()
+        # Test base_url derivation when image_base_url is blank
+        endpoint = requester._image_base_url(profile)
+        self.assertEqual(endpoint, 'https://apihub.agnes-ai.com/v1/images/generations')
+
+        # Test request body generation for image-to-image
+        dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
+        img_file = requester._png_image_file(dummy_img)
+        args = requester._agnes_api_args(profile, img_file)
+
+        self.assertEqual(args['model'], 'agnes-image-2.0-flash')
+        self.assertEqual(args['size'], '1024x1024')
+        self.assertIn('extra_body', args)
+        self.assertIn('image', args['extra_body'])
+        self.assertTrue(args['extra_body']['image'][0].startswith('data:image/png;base64,'))
+        self.assertEqual(args['extra_body']['response_format'], 'b64_json')
+
+
+from unittest.mock import MagicMock
+
+
+class TestParallelTranslationSync(unittest.TestCase):
+    def test_imgtrans_thread_guards_num_pages_and_sync(self):
+        from ballontranslator.ui.module_manager import ImgtransThread
+
+        # Test that default num_pages is 0 and checkers safely return True when uninitialized
+        thread = MagicMock(spec=ImgtransThread)
+        thread.imgtrans_proj = None
+        thread.num_pages = 0
+        thread.detect_counter = 0
+
+        self.assertTrue(ImgtransThread.detect_finished(thread))
+        self.assertTrue(ImgtransThread.ocr_finished(thread))
+        self.assertTrue(ImgtransThread.translate_finished(thread))
+        self.assertTrue(ImgtransThread.inpaint_finished(thread))
+
 
 if __name__ == '__main__':
     unittest.main()
+

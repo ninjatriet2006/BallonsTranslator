@@ -2694,13 +2694,13 @@ class MainWindow(mainwindow_cls):
         shared.showed_exception.add(exception_type)
 
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning if hasattr(QMessageBox, 'Icon') else QMessageBox.Warning)
         msg.setWindowTitle(self.tr('API key required'))
         msg.setText(self.tr('The selected LLM profile requires an API key.'))
         msg.setInformativeText(
             self.tr('Fill the API key before running this LLM task for: {profile_name}').format(profile_name=profile_name)
         )
-        fill_btn = msg.addButton(self.tr('Fill API Key'), QMessageBox.AcceptRole)
+        fill_btn = msg.addButton(self.tr('Fill API Key'), QMessageBox.ButtonRole.AcceptRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.AcceptRole)
         msg.addButton(QMessageBox.StandardButton.Cancel)
         try:
             msg.exec()
@@ -2734,7 +2734,7 @@ class MainWindow(mainwindow_cls):
         field_name = field_by_target[target]
         display_profile_name = profile_name or profile_id or self.tr('LLM Profile')
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning if hasattr(QMessageBox, 'Icon') else QMessageBox.Warning)
         msg.setWindowTitle(title)
         msg.setText(
             self.tr('The selected LLM profile requires a {field_name}.').format(field_name=field_name)
@@ -2745,7 +2745,7 @@ class MainWindow(mainwindow_cls):
                 profile_name=display_profile_name,
             )
         )
-        fill_btn = msg.addButton(self.tr('Fill Model'), QMessageBox.AcceptRole)
+        fill_btn = msg.addButton(self.tr('Fill Model'), QMessageBox.ButtonRole.AcceptRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.AcceptRole)
         msg.addButton(QMessageBox.StandardButton.Cancel)
         try:
             msg.exec()
@@ -2784,7 +2784,7 @@ class MainWindow(mainwindow_cls):
         field_name = field_by_target[target]
         display_profile_name = profile_name or profile_id or self.tr('LLM Profile')
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning if hasattr(QMessageBox, 'Icon') else QMessageBox.Warning)
         msg.setWindowTitle(title)
         msg.setText(
             self.tr('The selected LLM profile requires this field: {field_name}.').format(field_name=field_name)
@@ -2795,7 +2795,7 @@ class MainWindow(mainwindow_cls):
                 profile_name=display_profile_name,
             )
         )
-        fill_btn = msg.addButton(self.tr('Fill URL'), QMessageBox.AcceptRole)
+        fill_btn = msg.addButton(self.tr('Fill URL'), QMessageBox.ButtonRole.AcceptRole if hasattr(QMessageBox, 'ButtonRole') else QMessageBox.AcceptRole)
         msg.addButton(QMessageBox.StandardButton.Cancel)
         try:
             msg.exec()

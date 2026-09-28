@@ -203,9 +203,22 @@ class LLMImageRequester:
             )
         return resolved
 
-    @staticmethod
-    def _image_base_url(profile: LLMProfile) -> str:
+    @classmethod
+    def _image_base_url(cls, profile: LLMProfile) -> str:
         base_url = str(profile.image_base_url or '').strip()
+        if not base_url:
+            raw_base = str(profile.base_url or '').strip()
+            if raw_base:
+                if cls._is_gemini_url(raw_base):
+                    base_url = raw_base
+                elif cls._is_openrouter_url(raw_base):
+                    base_url = cls._join_url(raw_base.rstrip('/'), '/images')
+                elif cls._is_agnes_url(raw_base) or str(profile.image_model or '').startswith('agnes-image'):
+                    base_url = cls._agnes_endpoint(raw_base)
+                elif raw_base.rstrip('/').endswith(('images', 'images/edits', 'images/generations')):
+                    base_url = raw_base
+                else:
+                    base_url = raw_base.rstrip('/') + '/images/edits'
         if not base_url:
             raise LLMBaseURLRequiredError(
                 profile.id, profile.name, target='image_base_url'
@@ -351,6 +364,20 @@ class LLMImageRequester:
             urlparse(base_url).netloc.lower()
             == 'generativelanguage.googleapis.com'
         )
+
+    @staticmethod
+    def _is_agnes_url(base_url: str) -> bool:
+        host = urlparse(base_url).netloc.lower()
+        return host == 'agnes-ai.com' or host.endswith('.agnes-ai.com')
+
+    @classmethod
+    def _agnes_endpoint(cls, base_url: str) -> str:
+        base = base_url.rstrip('/')
+        if base.endswith('/images/generations'):
+            return base
+        if '/v1' in base:
+            return cls._join_url(base, '/images/generations')
+        return cls._join_url(base, '/v1/images/generations')
 
     @classmethod
     def _gemini_generate_content_url(
@@ -582,6 +609,63 @@ class LLMImageRequester:
         self._raise_for_response(profile, response)
         return self._decode_gemini_response_image(response.json())
 
+    def _agnes_api_args(
+        self,
+        profile: LLMProfile,
+        image_file: Optional[io.BytesIO],
+        prompt: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Dict:
+        size = '1024x1024'
+        if image_file is not None:
+            try:
+                with Image.open(io.BytesIO(image_file.getvalue())) as pil_img:
+                    w, h = pil_img.size
+                    if w > h * 1.2:
+                        size = '1024x768'
+                    elif h > w * 1.2:
+                        size = '768x1024'
+                    else:
+                        size = '1024x1024'
+            except Exception:
+                size = '1024x1024'
+
+        result = {
+            'model': self._image_model(profile, model),
+            'prompt': prompt if prompt is not None else profile.image_prompt,
+            'size': size,
+        }
+        if image_file is None:
+            result['return_base64'] = True
+        else:
+            encoded = base64.b64encode(image_file.getvalue()).decode('ascii')
+            result['extra_body'] = {
+                'image': [f'data:image/png;base64,{encoded}'],
+                'response_format': 'b64_json',
+            }
+        return result
+
+    def _request_agnes_image(
+        self,
+        client,
+        profile: LLMProfile,
+        image_file: Optional[io.BytesIO],
+        prompt: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> np.ndarray:
+        endpoint = self._agnes_endpoint(self._image_base_url(profile))
+        response = client.post(
+            endpoint,
+            headers=self._headers(
+                self._api_key_for_profile(profile), json_request=True
+            ),
+            json=self._agnes_api_args(
+                profile, image_file, prompt=prompt, model=model
+            ),
+        )
+        self._raise_for_response(profile, response)
+        return self._decode_response_image(response.json())
+
     def _request_openai_compatible_image(
         self,
         client,
@@ -652,6 +736,10 @@ class LLMImageRequester:
                 )
             elif self._is_openrouter_url(base_url):
                 result = self._request_openrouter_image(
+                    client, profile, image_file, prompt=prompt, model=model
+                )
+            elif self._is_agnes_url(base_url) or str(model or profile.image_model or '').startswith('agnes-image'):
+                result = self._request_agnes_image(
                     client, profile, image_file, prompt=prompt, model=model
                 )
             else:
