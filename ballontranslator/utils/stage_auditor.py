@@ -113,6 +113,32 @@ def is_safety_refusal_error(error: Exception | str) -> bool:
     ]
     return any(kw in msg for kw in refusal_keywords)
 
+def _extract_block_text(b: object) -> str:
+    """Safely extract text from TextBlock or mock object as a stripped string."""
+    if hasattr(b, 'get_text') and callable(getattr(b, 'get_text')):
+        try:
+            val = b.get_text()
+            if isinstance(val, str):
+                return val.strip()
+        except Exception:
+            pass
+    raw = getattr(b, 'text', '')
+    if isinstance(raw, (list, tuple)):
+        return ' '.join(str(item) for item in raw if item).strip()
+    if isinstance(raw, str):
+        return raw.strip()
+    return str(raw or '').strip()
+
+
+def _extract_block_translation(b: object) -> str:
+    """Safely extract translation from TextBlock or mock object as a stripped string."""
+    raw = getattr(b, 'translation', '')
+    if isinstance(raw, (list, tuple)):
+        return ' '.join(str(item) for item in raw if item).strip()
+    if isinstance(raw, str):
+        return raw.strip()
+    return str(raw or '').strip()
+
 
 class StageAuditor:
     """Deterministic, zero-AI-token auditor for image translation project pages."""
@@ -165,7 +191,7 @@ class StageAuditor:
             # 2. OCR Stage Audit
             if enabled.get('ocr', False) and len(textblocks) > 0:
                 has_ocr_flag = bool(fin_code & RunStatus.FIN_OCR)
-                blocks_missing_ocr = sum(1 for b in textblocks if not getattr(b, 'text', '').strip())
+                blocks_missing_ocr = sum(1 for b in textblocks if not _extract_block_text(b))
                 if not has_ocr_flag and blocks_missing_ocr == len(textblocks):
                     issues.append(StageIssue(
                         page_key=pagename,
@@ -180,8 +206,8 @@ class StageAuditor:
                 has_trans_flag = bool(fin_code & RunStatus.FIN_TRANSLATE)
                 blocks_missing_trans = sum(
                     1 for b in textblocks
-                    if not getattr(b, 'translation', '').strip()
-                    and bool(getattr(b, 'text', '').strip())
+                    if not _extract_block_translation(b)
+                    and bool(_extract_block_text(b))
                 )
                 if not has_trans_flag and blocks_missing_trans > 0:
                     issues.append(StageIssue(

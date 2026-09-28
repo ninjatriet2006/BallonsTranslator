@@ -2416,16 +2416,19 @@ class ModuleManager(QObject):
         self.progress_msgbox.hide()
 
     def _on_update_stage_progress(self, stage: str, progress: int, update_progress: Callable[[int], None]):
-        ri = self.imgtrans_thread.recent_finished_index(progress)
-        if stage in shared.pbar:
-            shared.pbar[stage].update(1)
-        progress = int(progress / self.imgtrans_thread.num_pages * 100)
-        update_progress(progress)
-        if ri != self.last_finished_index:
-            self.last_finished_index = ri
-            self.page_trans_finished.emit(ri)
-        if progress == 100:
-            self.finishImgtransPipeline()
+        try:
+            ri = self.imgtrans_thread.recent_finished_index(progress)
+            if stage in shared.pbar:
+                shared.pbar[stage].update(1)
+            progress = int(progress / self.imgtrans_thread.num_pages * 100)
+            update_progress(progress)
+            if ri != self.last_finished_index:
+                self.last_finished_index = ri
+                self.page_trans_finished.emit(ri)
+            if progress == 100:
+                self.finishImgtransPipeline()
+        except Exception as e:
+            LOGGER.error(f"Error in _on_update_stage_progress({stage}, {progress}): {e}")
 
     def on_update_detect_progress(self, progress: int):
         self._on_update_stage_progress('detect', progress, self.progress_msgbox.updateDetectProgress)
@@ -2462,27 +2465,35 @@ class ModuleManager(QObject):
 
     def finishImgtransPipeline(self, force: bool = False):
         if force or self.proj_finished():
-            self.progress_msgbox.hide()
-            start_time = getattr(self.imgtrans_thread, 'pipeline_start_time', None)
-            elapsed_str = f" in {time.time() - start_time:.1f}s" if start_time else ""
-            stats = []
-            if cfg_module.enable_detect:
-                stats.append(f"Detect: {self.imgtrans_thread.detect_counter}")
-            if cfg_module.enable_ocr:
-                stats.append(f"OCR: {self.imgtrans_thread.ocr_counter}")
-            if cfg_module.enable_translate:
-                trans_count = (
-                    self.translate_thread.finished_counter
-                    if getattr(self.imgtrans_thread, 'parallel_trans', False)
-                    else self.imgtrans_thread.translate_counter
-                )
-                stats.append(f"Translate: {trans_count}")
-            if cfg_module.enable_inpaint:
-                stats.append(f"Inpaint: {self.imgtrans_thread.inpaint_counter}")
-            stats_str = f" | Stats: {', '.join(stats)}" if stats else ""
-            LOGGER.stop(f"Translation pipeline completed: {self.imgtrans_thread.num_pages} page(s){elapsed_str}{stats_str}")
+            try:
+                self.progress_msgbox.hide()
+                start_time = getattr(self.imgtrans_thread, 'pipeline_start_time', None)
+                elapsed_str = f" in {time.time() - start_time:.1f}s" if start_time else ""
+                stats = []
+                if cfg_module.enable_detect:
+                    stats.append(f"Detect: {self.imgtrans_thread.detect_counter}")
+                if cfg_module.enable_ocr:
+                    stats.append(f"OCR: {self.imgtrans_thread.ocr_counter}")
+                if cfg_module.enable_translate:
+                    trans_count = (
+                        self.translate_thread.finished_counter
+                        if getattr(self.imgtrans_thread, 'parallel_trans', False)
+                        else self.imgtrans_thread.translate_counter
+                    )
+                    stats.append(f"Translate: {trans_count}")
+                if cfg_module.enable_inpaint:
+                    stats.append(f"Inpaint: {self.imgtrans_thread.inpaint_counter}")
+                stats_str = f" | Stats: {', '.join(stats)}" if stats else ""
+                LOGGER.stop(f"Translation pipeline completed: {self.imgtrans_thread.num_pages} page(s){elapsed_str}{stats_str}")
+            except Exception as e:
+                LOGGER.error(f"Error logging pipeline stats: {e}")
+
             self._audit_and_update_issues()
-            self.imgtrans_pipeline_finished.emit()
+
+            try:
+                self.imgtrans_pipeline_finished.emit()
+            except Exception as e:
+                LOGGER.error(f"Error emitting imgtrans_pipeline_finished: {e}")
     
     def on_imgtrans_thread_finished(self):
         """Ensure cleanup and issue audit when the pipeline thread finishes."""
@@ -2490,32 +2501,41 @@ class ModuleManager(QObject):
 
     def on_imgtrans_thread_stopped(self):
         """线程完成时确保关闭进度对话框"""
-        self.progress_msgbox.hide()
+        try:
+            self.progress_msgbox.hide()
+        except Exception:
+            pass
         self._audit_and_update_issues()
-        self.imgtrans_pipeline_finished.emit()
+        try:
+            self.imgtrans_pipeline_finished.emit()
+        except Exception as e:
+            LOGGER.error(f"Error emitting imgtrans_pipeline_finished on stop: {e}")
 
     def _audit_and_update_issues(self):
-        enabled_stages = {
-            'detect': cfg_module.enable_detect,
-            'ocr': cfg_module.enable_ocr,
-            'translate': cfg_module.enable_translate,
-            'inpaint': cfg_module.enable_inpaint,
-        }
-        target_pages = getattr(self.imgtrans_thread, 'pages_to_process', None)
-        audited = StageAuditor.audit_project_pages(
-            self.imgtrans_proj,
-            target_pages=target_pages,
-            enabled_stages=enabled_stages,
-        )
-        runtime = getattr(self.imgtrans_thread, 'runtime_issues', [])
-        all_issues = list(runtime)
-        seen = {(issue.page_key, issue.stage) for issue in all_issues}
-        for ai in audited:
-            if (ai.page_key, ai.stage) not in seen:
-                all_issues.append(ai)
-                seen.add((ai.page_key, ai.stage))
-        self._pipeline_issues = all_issues
-        self.pipeline_issues_updated.emit(len(self._pipeline_issues))
+        try:
+            enabled_stages = {
+                'detect': cfg_module.enable_detect,
+                'ocr': cfg_module.enable_ocr,
+                'translate': cfg_module.enable_translate,
+                'inpaint': cfg_module.enable_inpaint,
+            }
+            target_pages = getattr(self.imgtrans_thread, 'pages_to_process', None)
+            audited = StageAuditor.audit_project_pages(
+                self.imgtrans_proj,
+                target_pages=target_pages,
+                enabled_stages=enabled_stages,
+            )
+            runtime = getattr(self.imgtrans_thread, 'runtime_issues', [])
+            all_issues = list(runtime)
+            seen = {(issue.page_key, issue.stage) for issue in all_issues}
+            for ai in audited:
+                if (ai.page_key, ai.stage) not in seen:
+                    all_issues.append(ai)
+                    seen.add((ai.page_key, ai.stage))
+            self._pipeline_issues = all_issues
+            self.pipeline_issues_updated.emit(len(self._pipeline_issues))
+        except Exception as e:
+            LOGGER.error(f"Error auditing pipeline issues: {e}")
 
     def _select_module(self, module_key: str, module_name: str, valid_modules: List[str]):
         if module_name is None:

@@ -129,16 +129,20 @@ class PageRangeAndAuditorTests(unittest.TestCase):
                     'p1.png': [MockBlock(text="Hello", translation="Xin chào")],
                     'p2.png': [MockBlock(text="World", translation="")],  # Missing translation
                     'p3.png': [],  # Missing detection
+                    'p4.png': [MockBlock(text=["Line 1", "Line 2"], translation="Dòng 1 Dòng 2")],  # List text
+                    'p5.png': [MockBlock(text=[], translation="")],  # Empty list text
                 }
 
             def pagename2idx(self, name):
                 return list(self.pages.keys()).index(name)
 
             def get_page_finish_code(self, name):
-                if name == 'p1.png':
+                if name in ('p1.png', 'p4.png'):
                     return 15  # All stages finished
                 elif name == 'p2.png':
                     return 3   # Det + OCR finished, trans & inpaint missing
+                elif name == 'p5.png':
+                    return 1   # Only Det finished, missing OCR & trans
                 return 0
 
         proj = MockProject()
@@ -148,6 +152,13 @@ class PageRangeAndAuditorTests(unittest.TestCase):
         # p1 has no issues
         self.assertNotIn(('p1.png', 'detect'), issue_map)
         self.assertNotIn(('p1.png', 'translate'), issue_map)
+
+        # p4 with list text has no issues
+        self.assertNotIn(('p4.png', 'ocr'), issue_map)
+        self.assertNotIn(('p4.png', 'translate'), issue_map)
+
+        # p5 with empty list text is missing OCR
+        self.assertIn(('p5.png', 'ocr'), issue_map)
 
         # p2 is missing translation
         self.assertIn(('p2.png', 'translate'), issue_map)
