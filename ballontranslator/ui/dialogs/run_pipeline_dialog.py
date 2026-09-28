@@ -34,10 +34,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.ui.icon_rendering import render_svg_pixmap
-from ballontranslator.ui.misc import themed_icon_path
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
 from ballontranslator.ui.framelesswindow import DialogCloseButton, FramelessMoveResize
-from ballontranslator.ui.llm_modality import (
+from ballontranslator.ui.core.llm_modality import (
     LLM_MODALITY_IMAGE,
     LLM_MODALITY_IMAGE_COLOR,
     LLM_MODALITY_TEXT,
@@ -46,10 +46,10 @@ from ballontranslator.ui.llm_modality import (
     LLM_MODALITY_VISION_COLOR,
     modality_badge_qcolor,
 )
-from ballontranslator.ui.page_range_progress import PageRangeProgressWidget, PageRangeSpinBox
+from ballontranslator.ui.widgets.page_range_progress import PageRangeProgressWidget, PageRangeSpinBox
 from ballontranslator.ui.custom_widget import ExpandingToolButton
 from ballontranslator.ui.custom_widget.combobox import BottomBorderComboBox
-from ballontranslator.utils.config import (
+from ballontranslator.utils.project.config import (
     LLMGlossaryMode,
     LLMTranslateContext,
     OCRTextPostprocess,
@@ -57,8 +57,8 @@ from ballontranslator.utils.config import (
     save_config,
     TranslateContext,
 )
-from ballontranslator.utils.llm_profiles import LLM_OCR_KEY, LLM_TRANSLATOR_KEY
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.project.llm_profiles import LLM_OCR_KEY, LLM_TRANSLATOR_KEY
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 from ballontranslator.modules import (
     GET_VALID_INPAINTERS,
     GET_VALID_OCR,
@@ -432,11 +432,12 @@ class RunPipelineDialog(QDialog):
 
         self.run_button = QPushButton(self.tr('Run'), surface)
         self.run_button.setObjectName('RunPipelinePrimaryButton')
+        self.run_button.setDefault(True)
         self.run_button.clicked.connect(self._finish_run)
 
         self.continue_button = QPushButton(self.tr('Continue'), surface)
         self.continue_button.setObjectName('RunPipelineSecondaryButton')
-        self.continue_button.setDefault(True)
+        self.continue_button.setDefault(False)
         self.continue_button.clicked.connect(self._finish_continue)
         button_row.addWidget(self.run_button)
         button_row.addWidget(self.continue_button)
@@ -742,6 +743,9 @@ class RunPipelineDialog(QDialog):
         self.progress_bar = self.page_range_progress.range_bar
         self.page_range_progress.range_changed.connect(
             self._on_page_range_changed
+        )
+        self.page_range_progress.custom_range_input.returnPressed.connect(
+            self._finish_run
         )
         layout.addWidget(self.page_range_progress)
         self._refresh_progress()
@@ -1688,7 +1692,8 @@ class RunPipelineDialog(QDialog):
         self.continue_button.setVisible(not rendering)
         self.render_button.setVisible(rendering)
         self.render_button.setDefault(rendering)
-        self.continue_button.setDefault(not rendering)
+        self.run_button.setDefault(not rendering)
+        self.continue_button.setDefault(False)
         self._fit_to_current_workflow()
 
     def _on_render_without_text_style_update_changed(self, checked: bool):

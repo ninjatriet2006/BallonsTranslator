@@ -46,7 +46,7 @@ from qtpy.QtGui import (
     QTransform,
 )
 
-from ballontranslator.ui.misc import ndarray2pixmap, pixmap2ndarray
+from ballontranslator.ui.core.misc import ndarray2pixmap, pixmap2ndarray
 from .morphology import dilate_alpha_disc
 
 

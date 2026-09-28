@@ -3,8 +3,8 @@ import os.path as osp
 from typing import Optional
 from qtpy.QtWidgets import QListWidgetItem, QWidget
 from qtpy.QtGui import QIcon
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import pcfg, save_config
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import pcfg, save_config
 from ballontranslator.ui.text_engine.editing.manager import SceneTextReplacementReason
 
 

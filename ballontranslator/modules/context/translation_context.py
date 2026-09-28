@@ -18,7 +18,7 @@ from .history import (
 from .token_usage import messages_token_count
 
 if TYPE_CHECKING:
-    from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+    from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 
 
 @dataclass(frozen=True)

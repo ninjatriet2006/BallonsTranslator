@@ -16,11 +16,11 @@ from qtpy.QtWidgets import (
     QGraphicsPathItem,
 )
 
-from ballontranslator.utils.fontformat import GridTextTransform
+from ballontranslator.utils.fonts.fontformat import GridTextTransform
 
 from ..rendering.surface import NonlinearTextSurfaceRenderer
 from ..rendering.raster import RASTER_BOUNDARY_FAILURES
-from ...cursor import rotateCursorList
+from ballontranslator.ui.canvas.cursor import rotateCursorList
 from .modal import ModalPointTransform
 from ..shape_control import CONTROL_ITEM_DATA_KEY
 

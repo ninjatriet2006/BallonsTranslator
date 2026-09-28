@@ -2,15 +2,15 @@ import unittest
 from qtpy.QtWidgets import QApplication
 from qtpy.QtCore import Qt
 
-from ballontranslator.utils.stage_auditor import (
+from ballontranslator.utils.project.stage_auditor import (
     parse_page_ranges,
     format_page_ranges,
     is_safety_refusal_error,
     StageAuditor,
     StageIssue,
 )
-from ballontranslator.ui.page_range_progress import PageRangeProgressWidget
-from ballontranslator.ui.pipeline_error_dialog import PipelineErrorDialog
+from ballontranslator.ui.widgets.page_range_progress import PageRangeProgressWidget
+from ballontranslator.ui.dialogs.pipeline_error_dialog import PipelineErrorDialog
 
 
 class PageRangeAndAuditorTests(unittest.TestCase):
@@ -231,7 +231,7 @@ class PageRangeAndAuditorTests(unittest.TestCase):
 class TestAgnesImageRequester(unittest.TestCase):
     def test_agnes_endpoint_and_payload(self):
         from ballontranslator.modules.llm_image import LLMImageRequester
-        from ballontranslator.utils.llm_profiles import LLMProfile
+        from ballontranslator.utils.project.llm_profiles import LLMProfile
         import numpy as np
 
         profile = LLMProfile(

@@ -5,7 +5,7 @@ import math
 from qtpy.QtCore import QPointF, QRectF, Qt
 from qtpy.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 
-from ballontranslator.utils.text_alpha_mask import TextAlphaMask
+from ballontranslator.utils.text.text_alpha_mask import TextAlphaMask
 from ..rendering.raster import (
     EFFECT_CACHE_MAX_BYTES,
     EFFECT_CACHE_MAX_DIMENSION,
@@ -26,7 +26,7 @@ def render_text_alpha_mask(
     The transform is anchored in item coordinates, making full and tiled
     surfaces sample the same mask geometry.
 
-    >>> from ballontranslator.utils.text_alpha_mask import AlphaBrushStroke
+    >>> from ballontranslator.utils.text.text_alpha_mask import AlphaBrushStroke
     >>> mask = TextAlphaMask(strokes=(AlphaBrushStroke('erase', 4, ((0, 0),)),))
     >>> render_text_alpha_mask(mask, QRectF(-2, -2, 4, 4), QPointF(), 1).isNull()
     False

@@ -3,7 +3,7 @@ from qtpy.QtCore import  Qt, QPropertyAnimation, QRect, QRectF, Signal, QPoint, 
 from qtpy.QtGui import QFontMetrics, QMouseEvent, QPainter, QFontMetrics, QColor
 
 from .helper import themeColor, borderColor, widgetBackgroundColor
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 
 def slider_subcontrol_rect(r: QRect, widget: QWidget):

@@ -4,19 +4,19 @@ from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence, Set, 
 import time, requests, re, uuid, base64, hmac, functools, json, copy
 
 from .exceptions import InvalidSourceOrTargetLanguage, TranslatorSetupFailure, MissingTranslatorParams, TranslatorNotValid
-from ballontranslator.utils.textblock import TextBlock
+from ballontranslator.utils.text.textblock import TextBlock
 from ..base import BaseModule, DEVICE_SELECTOR
-from ballontranslator.utils.registry import Registry
-from ballontranslator.utils.io_utils import text_is_empty
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.config import OCRTextPostprocess, TranslateContext, pcfg
-from ballontranslator.utils.text_processing import (
+from ballontranslator.utils.project.registry import Registry
+from ballontranslator.utils.system.io_utils import text_is_empty
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.project.config import OCRTextPostprocess, TranslateContext, pcfg
+from ballontranslator.utils.text.text_processing import (
     finalize_translation_text,
     substitute_keywords,
 )
 
 if TYPE_CHECKING:
-    from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+    from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 
 
 TRANSLATORS = Registry('translators')

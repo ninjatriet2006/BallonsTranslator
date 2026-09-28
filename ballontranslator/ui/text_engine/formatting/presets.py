@@ -5,17 +5,17 @@ from qtpy.QtCore import QEvent, QMimeData, QPoint, Signal, Qt, QRectF
 from qtpy.QtGui import QDrag, QFontMetrics, QColor, QPixmap, QPainter, QContextMenuEvent, QMouseEvent
 
 
-from ballontranslator.utils.fontformat import FontFormat
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.fonts.fontformat import FontFormat
+from ballontranslator.utils.text.text_effects import (
     effect_paint_fallback_color,
     without_project_raster_effects,
     primary_stroke,
 )
-from ballontranslator.utils.config import save_text_styles, text_styles
-from ballontranslator.utils import config as C
+from ballontranslator.utils.project.config import save_text_styles, text_styles
+from ballontranslator.utils.project import config as C
 from ..font_family import qfont_with_family
 from ...custom_widget import PanelArea, Widget, FlowLayout
-from ...misc import themed_icon_url
+from ballontranslator.ui.core.misc import themed_icon_url
 
 
 def _drop_event_position(event: Any) -> QPoint:

@@ -8,12 +8,12 @@ from qtpy.QtCore import Qt, Signal, QUrl, QThread
 from qtpy.QtGui import QImage, QPixmap
 from qtpy.QtWidgets import QDialog, QMessageBox, QFileDialog
 
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.io_utils import imread, imwrite
-from ballontranslator.utils.message import create_error_dialog
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.system.io_utils import imread, imwrite
+from ballontranslator.utils.project.message import create_error_dialog
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 from ballontranslator.ui.custom_widget import ProgressMessageBox
-from ballontranslator.ui.misc import pixmap2ndarray
+from ballontranslator.ui.core.misc import pixmap2ndarray
 
 
 class ThreadBase(QThread):
@@ -220,7 +220,7 @@ class MergeThread(ThreadBase):
     
     def _run_merge(self):
         """执行合并任务 - 优化版：只读写一次JSON文件"""
-        from ballontranslator.utils import merger
+        from ballontranslator.utils.project import merger
         import json
         import copy
         

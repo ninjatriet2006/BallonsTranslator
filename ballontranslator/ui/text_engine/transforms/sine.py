@@ -9,7 +9,7 @@ import numpy as np
 from qtpy.QtCore import QPointF, QRectF
 from qtpy.QtGui import QPainterPath
 
-from ballontranslator.utils.fontformat import SineTextTransform
+from ballontranslator.utils.fonts.fontformat import SineTextTransform
 
 
 class SineMapper:

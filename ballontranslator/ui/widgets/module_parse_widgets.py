@@ -1,11 +1,11 @@
 from ballontranslator.ui.custom_widget import ParamComboBox, ParamNameLabel
-from ballontranslator.utils.shared import (
+from ballontranslator.utils.project.shared import (
     CONFIG_COMBOBOX_HEIGHT,
     CONFIG_COMBOBOX_LONG,
     CONFIG_CONTENT_ROW_SPACING,
     size2width,
 )
-from ballontranslator.utils.config import save_config
+from ballontranslator.utils.project.config import save_config
 from ballontranslator.ui.framelesswindow import OutsideClickFramelessMixin
 from ballontranslator.ui.module_param_i18n import (
     tr_module_description,

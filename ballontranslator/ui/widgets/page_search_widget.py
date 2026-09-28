@@ -5,7 +5,7 @@ from qtpy.QtGui import QKeyEvent, QTextCursor, QHideEvent, QInputMethodEvent, QF
 from typing import List, Union, Tuple, Dict
 import re
 
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.project.config import pcfg
 from ballontranslator.ui.custom_widget import Widget, ClickableLabel
 from ballontranslator.ui.text_engine.item import TextBlkItem
 from ballontranslator.ui.text_engine.editing.widgets import TransPairWidget, SourceTextEdit, TransTextEdit

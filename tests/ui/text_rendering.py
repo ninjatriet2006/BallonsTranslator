@@ -16,8 +16,8 @@ if __name__ == '__main__':
     os.environ['QT_API'] = 'pyqt6'
 
     from ballontranslator.launch import main, args
-    from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-    from ballontranslator.utils.io_utils import imread, imwrite, json_dump_nested_obj
+    from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
+    from ballontranslator.utils.system.io_utils import imread, imwrite, json_dump_nested_obj
 
     test_dir = 'tests/test_dir/text_rendering'
     if not osp.exists(test_dir):

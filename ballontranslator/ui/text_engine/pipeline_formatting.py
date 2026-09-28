@@ -13,10 +13,10 @@ from qtpy.QtGui import (
     QTextDocument,
 )
 
-from ballontranslator.utils.config import AutoTateChuYokoConfig
-from ballontranslator.utils.fontformat import font_weight_to_qt
-from ballontranslator.utils.message import create_error_dialog
-from ballontranslator.utils.textblock import TextBlock
+from ballontranslator.utils.project.config import AutoTateChuYokoConfig
+from ballontranslator.utils.fonts.fontformat import font_weight_to_qt
+from ballontranslator.utils.project.message import create_error_dialog
+from ballontranslator.utils.text.textblock import TextBlock
 from .font_family import qfont_with_family
 from .annotations import (
     apply_auto_text_combine_upright,

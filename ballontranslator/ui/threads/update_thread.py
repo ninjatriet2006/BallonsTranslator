@@ -2,7 +2,7 @@ import traceback
 
 from qtpy.QtCore import QThread, Signal
 
-from ballontranslator.utils.updater import BallonsTranslatorUpdater
+from ballontranslator.utils.system.updater import BallonsTranslatorUpdater
 
 
 class UpdateCheckThread(QThread):

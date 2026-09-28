@@ -13,10 +13,10 @@ from qtpy.QtGui import QFontMetrics, QMouseEvent
 
 from .scrollbar import ScrollBar
 from .widget import Widget
-from ..icon_rendering import render_svg_pixmap
-from ..misc import themed_icon_path
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import pcfg
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import pcfg
 
 CHEVRON_SIZE = 12
 CHEVRON_SIZE_SMALL = 14

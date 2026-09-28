@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from ballontranslator.utils import network_mirrors
+from ballontranslator.utils.env import network_mirrors
 
 
 class NetworkMirrorsTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class NetworkMirrorsTests(unittest.TestCase):
 
     def test_plain_dict_module_param_can_be_saved(self):
         try:
-            from ballontranslator.utils.config import ModuleConfig
+            from ballontranslator.utils.project.config import ModuleConfig
         except ModuleNotFoundError as e:
             self.skipTest(f'config dependencies unavailable: {e}')
 
@@ -63,7 +63,7 @@ class NetworkMirrorsTests(unittest.TestCase):
 
     def test_huggingface_download_rewrite_logs_mirror_use(self):
         try:
-            from ballontranslator.utils import download_util
+            from ballontranslator.utils.system import download_util
         except ModuleNotFoundError as e:
             self.skipTest(f'download dependencies unavailable: {e}')
 

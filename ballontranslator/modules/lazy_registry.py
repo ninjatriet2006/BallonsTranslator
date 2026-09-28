@@ -10,9 +10,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from ballontranslator.utils.registry import ModuleSpec
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.torch_install_helper import detect_nvidia_gpus
+from ballontranslator.utils.project.registry import ModuleSpec
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.env.torch_install_helper import detect_nvidia_gpus
 
 from .base import CUSTOM_MODULE_ROOT, MODULE_ROOT, MODULE_SCRIPTS, torch_available
 
@@ -380,7 +380,7 @@ class SafeEval:
                     if node.attr == 'ON_LINUX':
                         return sys.platform.startswith('linux')
                     if node.attr == 'ON_APPLE_SILICON':
-                        from ballontranslator.utils.shared import ON_APPLE_SILICON
+                        from ballontranslator.utils.project.shared import ON_APPLE_SILICON
                         return ON_APPLE_SILICON
             return UNKNOWN
         return getattr(value, node.attr, UNKNOWN)
@@ -839,17 +839,29 @@ def _module_files(module_type: str) -> List[str]:
     script = MODULE_SCRIPTS[module_type]
     pattern = re.compile(script['module_pattern'])
     files = []
-    module_dir = script['module_dir']
-    if os.path.isdir(module_dir):
-        for name in sorted(os.listdir(module_dir)):
-            if pattern.match(name):
-                files.append(os.path.join(module_dir, name))
+    module_dir = Path(script['module_dir'])
+    if module_dir.is_dir():
+        for sub in ('offline', 'online', 'llm'):
+            sub_dir = module_dir / sub
+            if sub_dir.is_dir():
+                for f in sorted(sub_dir.rglob('*.py')):
+                    if not f.name.startswith('__') and pattern.match(f.name):
+                        files.append(str(f))
+        for f in sorted(module_dir.glob('*.py')):
+            if not f.name.startswith('__') and pattern.match(f.name):
+                files.append(str(f))
     files.extend(EXTRA_MODULE_FILES.get(module_type, []))
     if os.path.isdir(CUSTOM_MODULE_ROOT):
         for name in sorted(os.listdir(CUSTOM_MODULE_ROOT)):
             if pattern.match(name):
                 files.append(os.path.join(CUSTOM_MODULE_ROOT, name))
-    return [path for path in files if os.path.exists(path)]
+    seen = set()
+    result = []
+    for path in files:
+        if path not in seen and os.path.exists(path):
+            seen.add(path)
+            result.append(path)
+    return result
 
 
 def _is_custom_module_file(path: str) -> bool:

@@ -3,8 +3,8 @@ from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QStandardItem, QStandardItemModel
 from typing import List, Dict
 
-from ballontranslator.utils.fontformat import FontFormat
-from ballontranslator.utils.text_processing import substitute_keywords
+from ballontranslator.utils.fonts.fontformat import FontFormat
+from ballontranslator.utils.text.text_processing import substitute_keywords
 from ballontranslator.ui.custom_widget import NoBorderPushBtn
 
 class KeywordSubWidget(QDialog):

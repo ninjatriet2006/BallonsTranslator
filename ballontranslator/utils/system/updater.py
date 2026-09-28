@@ -10,7 +10,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from ballontranslator.utils.project import shared
-from .logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 from .version import get_current_version
 
 

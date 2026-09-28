@@ -30,12 +30,12 @@ from qtpy.QtGui import (
     QFont,
 )
 
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     LineSpacingType,
     export_font_weight_html,
     import_font_weight_html,
 )
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 from .font_family import (
     html_uses_project_font_family,
     normalize_document_font_families,

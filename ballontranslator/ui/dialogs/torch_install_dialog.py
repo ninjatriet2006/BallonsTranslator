@@ -15,7 +15,7 @@ from qtpy.QtWidgets import (
 
 from ballontranslator.ui.package_manager import create_package_manager
 from ballontranslator.modules.lazy_registry import probe_torch_package
-from ballontranslator.utils.torch_install_helper import TORCH_CUDA_VERSION_OPTIONS, TORCH_INSTALL_DEVICE_OPTIONS
+from ballontranslator.utils.env.torch_install_helper import TORCH_CUDA_VERSION_OPTIONS, TORCH_INSTALL_DEVICE_OPTIONS
 
 
 CUDA_VERSION_LABELS = {

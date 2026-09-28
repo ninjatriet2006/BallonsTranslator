@@ -43,8 +43,8 @@ class LaunchRestartTests(unittest.TestCase):
 
     def test_load_config_then_save_uses_custom_config_path(self):
         try:
-            from ballontranslator.utils import config as program_config
-            from ballontranslator.utils import shared
+            from ballontranslator.utils.project import config as program_config
+            from ballontranslator.utils.project import shared
         except ImportError as e:
             self.skipTest(f'config dependencies unavailable: {e}')
 

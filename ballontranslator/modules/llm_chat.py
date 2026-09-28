@@ -17,7 +17,7 @@ from .exceptions import (
     LLMOutputLimitError,
     LLMRequestStopped,
 )
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.utils.project.llm_profiles import (
     LLMProfile,
     PROVIDER_DEFAULTS,
     THINKING_AUTO,
@@ -25,7 +25,7 @@ from ballontranslator.utils.llm_profiles import (
     normalize_thinking_level,
     resolve_api_key,
 )
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.project.config import pcfg
 
 TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
@@ -95,61 +95,7 @@ def _uses_provider_base_url(base_url: str, provider: str) -> bool:
     )
 
 
-def openai_chat_completion_args(
-    profile: LLMProfile,
-    model: str,
-) -> Dict[str, Any]:
-    """Map provider-neutral profile values to OpenAI chat API arguments.
-
-    Native OpenAI models default to ``max_completion_tokens`` so future model
-    names do not need version-pattern guesses. Only explicitly listed older
-    models and compatibility endpoints retain ``max_tokens``. Native GPT-5.5+
-    models use the API's fixed default temperature, so omit that argument.
-
-    >>> profile = LLMProfile.from_provider('OpenAI')
-    >>> openai_chat_completion_args(profile, 'gpt-5.5')
-    {'top_p': 1.0, 'max_completion_tokens': 8192}
-    >>> openai_chat_completion_args(profile, 'gpt-4o')['temperature']
-    0.1
-    """
-
-    base_url = _normalized_base_url(_openai_sdk_base_url(profile.base_url))
-    openai_base_url = _normalized_base_url(
-        PROVIDER_DEFAULTS['OpenAI']['base_url']
-    )
-    model_name = str(model or '').rsplit('/', 1)[-1].lower()
-    is_native_openai = not base_url or base_url == openai_base_url
-    args: Dict[str, Any] = {'top_p': float(profile.top_p)}
-    version_match = re.match(
-        r'^gpt-(\d+)(?:\.(\d+))?(?:-|$)', model_name
-    )
-    gpt_version = (
-        (int(version_match.group(1)), int(version_match.group(2) or 0))
-        if version_match
-        else None
-    )
-    if not is_native_openai or gpt_version is None or gpt_version < (5, 5):
-        args['temperature'] = float(profile.temperature)
-    token_limit_key = (
-        'max_completion_tokens'
-        if is_native_openai and model_name not in OPENAI_MAX_TOKENS_MODELS
-        else 'max_tokens'
-    )
-    args[token_limit_key] = int(profile.max_tokens)
-
-    thinking_level = normalize_thinking_level(profile.thinking_level)
-    if thinking_level == THINKING_AUTO:
-        return args
-    if thinking_level != THINKING_DISABLED:
-        args['reasoning_effort'] = thinking_level
-        return args
-    if _uses_provider_base_url(base_url, 'DeepSeek'):
-        args['extra_body'] = {'thinking': {'type': 'disabled'}}
-    elif _uses_provider_base_url(base_url, 'OpenRouter'):
-        args['extra_body'] = {'reasoning': {'effort': 'none'}}
-    else:
-        args['reasoning_effort'] = 'none'
-    return args
+from .llm.protocols.openai_completion import build_chat_completion_args as openai_chat_completion_args
 
 
 def openai_json_response_format(

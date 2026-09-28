@@ -10,7 +10,7 @@ from typing import Callable, Iterable, List, Optional, Sequence
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 
 TORCH_FAMILY_PACKAGES = {'torch', 'torchvision'}

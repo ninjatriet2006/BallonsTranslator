@@ -14,7 +14,7 @@ try:
 except:
     from qtpy.QtGui import QUndoStack, QUndoCommand
 
-from ballontranslator.ui.misc import ndarray2pixmap, QKEY, QNUMERIC_KEYS, ARROWKEY2DIRECTION
+from ballontranslator.ui.core.misc import ndarray2pixmap, QKEY, QNUMERIC_KEYS, ARROWKEY2DIRECTION
 from ballontranslator.ui.text_engine.item import TextBlkItem, TextBlock
 from ballontranslator.ui.text_engine.shape_control import (
     CONTROL_ITEM_DATA_KEY,
@@ -24,12 +24,12 @@ from ballontranslator.ui.text_engine.transforms.grid_control import TextGridTran
 from ballontranslator.ui.text_engine.transforms.projective_control import TextProjectiveTransformControl
 from ballontranslator.ui.text_engine.effects.alpha_mask_edit_session import TextAlphaMaskEditSession
 from ballontranslator.ui.custom_widget import ScrollBar, FadeLabel
-from ballontranslator.ui.image_edit import ImageEditMode, DrawingLayer, StrokeImgItem, PenShape
-from ballontranslator.ui.page_search_widget import PageSearchWidget
+from ballontranslator.ui.canvas.image_edit import ImageEditMode, DrawingLayer, StrokeImgItem, PenShape
+from ballontranslator.ui.widgets.page_search_widget import PageSearchWidget
 from ballontranslator.ui.text_engine.editing.commands import MoveByKeyCommand
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 
 CANVAS_SCALE_MAX = 10.0
 CANVAS_SCALE_MIN = 0.01

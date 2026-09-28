@@ -20,8 +20,8 @@ from ballontranslator.modules.exceptions import (
     LLMRequestStopped,
     LLMUserActionRequiredError,
 )
-from ballontranslator.utils.llm_profiles import LLMProfile, resolve_api_key
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.project.llm_profiles import LLMProfile, resolve_api_key
+from ballontranslator.utils.system.logger import logger as LOGGER
 
 
 @dataclass(frozen=True)

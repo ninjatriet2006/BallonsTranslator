@@ -12,10 +12,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils.stage_auditor import parse_page_ranges
+from ballontranslator.utils.project.stage_auditor import parse_page_ranges
 from ballontranslator.ui.custom_widget.helper import borderColor, themeColor, widgetBackgroundColor
-from ballontranslator.ui.icon_rendering import render_svg_pixmap
-from ballontranslator.ui.misc import themed_icon_path
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
 
 
 _ACCENT_COLOR = QColor(30, 147, 229)

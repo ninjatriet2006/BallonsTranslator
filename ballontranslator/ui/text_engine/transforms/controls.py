@@ -16,12 +16,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils.fontformat import TEXT_TRANSFORM_PRECISION
+from ballontranslator.utils.fonts.fontformat import TEXT_TRANSFORM_PRECISION
 
 from ...custom_widget import SmallSizeControlLabel
 from ...custom_widget.combobox import BottomBorderComboBox
-from ...icon_rendering import render_svg_pixmap
-from ...misc import themed_icon_path
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
 
 
 class TransformDragLabel(SmallSizeControlLabel):

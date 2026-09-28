@@ -6,9 +6,9 @@ import numpy as np
 from qtpy.QtWidgets import QApplication
 from qtpy.QtCore import QPointF, QRectF
 
-from ballontranslator.utils.fontformat import FontFormat
-from ballontranslator.utils.textblock import TextBlock
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.fonts.fontformat import FontFormat
+from ballontranslator.utils.text.textblock import TextBlock
+from ballontranslator.utils.project.config import pcfg
 
 app = QApplication.instance()
 if app is None:

@@ -3,8 +3,8 @@
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from ballontranslator.utils import config as C
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.project import config as C
+from ballontranslator.utils.fonts.fontformat import (
     GridTextTransform,
     ProjectiveTextTransform,
     TEXT_TRANSFORM_PRECISION,
@@ -12,7 +12,7 @@ from ballontranslator.utils.fontformat import (
     create_text_transform,
 )
 
-from ... import shared_widget as SW
+from ballontranslator.ui.widgets import shared_widget as SW
 from ..editing.commands import SetTextTransformCommand
 
 if TYPE_CHECKING:

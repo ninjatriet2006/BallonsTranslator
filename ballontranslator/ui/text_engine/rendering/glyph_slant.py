@@ -18,7 +18,7 @@ from qtpy.QtGui import (
     QTransform,
 )
 
-from ballontranslator.utils import shared as C
+from ballontranslator.utils.project import shared as C
 from .glyph import (
     GLYPH_STROKE_FORMAT_PROPERTY,
     GLOBAL_GLYPH_GEOMETRY_CACHE,

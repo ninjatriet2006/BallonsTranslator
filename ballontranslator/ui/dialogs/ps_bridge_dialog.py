@@ -25,9 +25,9 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QHideEvent, QShowEvent
 
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans, TextBlkEncoder
-from ballontranslator.utils.textblock import TextBlock
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans, TextBlkEncoder
+from ballontranslator.utils.text.textblock import TextBlock
 
 
 class PhotoshopBridgeUpdateError(ValueError):
@@ -91,7 +91,7 @@ def validate_photoshop_bridge_updates(
     """Validate a complete bridge payload before any project state is changed.
 
     >>> from types import SimpleNamespace
-    >>> from ballontranslator.utils.textblock import TextBlock
+    >>> from ballontranslator.utils.text.textblock import TextBlock
     >>> block = TextBlock(translation="old")
     >>> project = SimpleNamespace(
     ...     proj_path="project.json", pages={"page.png": [block]}

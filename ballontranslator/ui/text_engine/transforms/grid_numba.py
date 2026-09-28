@@ -5,7 +5,7 @@ import os
 import os.path as osp
 import threading
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 
 NUMBA_CACHE_DIR = osp.join(shared.cache_dir, 'numba')

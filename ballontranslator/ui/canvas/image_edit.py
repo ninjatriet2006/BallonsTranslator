@@ -6,7 +6,7 @@ from qtpy.QtCore import QRectF, Qt, QPointF, QSize
 from qtpy.QtWidgets import QStyleOptionGraphicsItem, QGraphicsPixmapItem, QWidget, QGraphicsItem
 from qtpy.QtGui import QPen, QPainter, QPixmap, QImage, QBrush
 
-from ballontranslator.ui.misc import pixmap2ndarray
+from ballontranslator.ui.core.misc import pixmap2ndarray
 
 SIZE_MAX = 2147483647
 

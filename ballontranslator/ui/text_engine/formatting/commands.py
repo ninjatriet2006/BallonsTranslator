@@ -15,9 +15,9 @@ try:
 except ImportError:
     from qtpy.QtGui import QUndoCommand
 
-from ... import shared_widget as SW
-from ballontranslator.utils.fontformat import FontFormat, FontWeight, px2pt
-from ballontranslator.utils.io_utils import empty_func
+from ballontranslator.ui.widgets import shared_widget as SW
+from ballontranslator.utils.fonts.fontformat import FontFormat, FontWeight, px2pt
+from ballontranslator.utils.system.io_utils import empty_func
 from ..item import TextBlkItem
 
 global_default_set_kwargs = dict(set_selected=False, restore_cursor=False)

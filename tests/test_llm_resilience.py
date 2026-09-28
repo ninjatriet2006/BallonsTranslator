@@ -12,8 +12,8 @@ from ballontranslator.modules.context.glossary import (
     select_glossary,
     _FastGlossaryMatcher,
 )
-from ballontranslator.utils.text_layout import Line, balance_lines
-from ballontranslator.utils.llm_profiles import LLMProfile
+from ballontranslator.utils.text.text_layout import Line, balance_lines
+from ballontranslator.utils.project.llm_profiles import LLMProfile
 
 
 class TestRetryAfterParser(unittest.TestCase):

@@ -11,12 +11,12 @@ from qtpy.QtCore import QRectF, Qt
 from qtpy.QtGui import QPainter, QPixmap
 from qtpy.QtWidgets import QStyleOptionGraphicsItem, QWidget
 
-from ballontranslator.utils.rgba import (
+from ballontranslator.utils.project.rgba import (
     premultiply_rgba_in_place,
     unpremultiply_rgba_in_place,
 )
 
-from ...misc import ndarray2pixmap, pixmap2ndarray
+from ballontranslator.ui.core.misc import ndarray2pixmap, pixmap2ndarray
 from .raster import (
     EffectRasterAllocationError,
     plan_effect_raster,

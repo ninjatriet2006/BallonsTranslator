@@ -13,7 +13,7 @@ from qtpy.QtWidgets import (
     QGraphicsSceneMouseEvent,
 )
 
-from ballontranslator.utils.text_alpha_mask import (
+from ballontranslator.utils.text.text_alpha_mask import (
     ALPHA_BRUSH_MODES,
     AlphaBrushStroke,
     TextAlphaMask,

@@ -5,7 +5,7 @@ import numpy as np
 import copy
 
 from qtpy.QtWidgets import QApplication, QWidget, QMessageBox, QCheckBox
-from ballontranslator.utils.text_effects import without_project_raster_effects
+from ballontranslator.utils.text.text_effects import without_project_raster_effects
 from qtpy.QtCore import QObject, QRectF, Qt, Signal, QPointF
 from qtpy.QtGui import QKeyEvent, QTextCursor, QFontMetricsF, QFont, QTextCharFormat, QClipboard
 try:
@@ -14,9 +14,9 @@ except:
     from qtpy.QtGui import QUndoCommand
 
 from ..item import TextBlkItem, TextBlock
-from ...canvas import Canvas
+from ballontranslator.ui.canvas.canvas import Canvas
 from .widgets import TransTextEdit, SourceTextEdit, TransPairWidget, TextEditListScrollArea, QVBoxLayout, Widget
-from ballontranslator.utils.fontformat import FontFormat
+from ballontranslator.utils.fonts.fontformat import FontFormat
 from .commands import (
     ApplyFontformatCommand,
     AutoLayoutCommand,
@@ -34,13 +34,13 @@ from .commands import (
     propagate_user_edit,
 )
 from ..formatting.panel import FontFormatPanel
-from ballontranslator.utils import config as C
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils import shared
-from ballontranslator.utils.imgproc_utils import extract_ballon_region, get_block_mask
-from ballontranslator.utils.text_processing import seg_text, is_cjk
-from ballontranslator.utils.text_layout import layout_text
+from ballontranslator.utils.project import config as C
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.system.imgproc_utils import extract_ballon_region, get_block_mask
+from ballontranslator.utils.text.text_processing import seg_text, is_cjk
+from ballontranslator.utils.text.text_layout import layout_text
 
 
 def build_path_reorder_map(

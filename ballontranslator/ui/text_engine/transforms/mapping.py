@@ -15,7 +15,7 @@ import numpy as np
 from qtpy.QtCore import QPointF, QRectF
 from qtpy.QtGui import QPainterPath, QPolygonF, QTransform
 
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     BendTextTransform,
     GridTextTransform,
     ProjectiveTextTransform,

@@ -18,7 +18,7 @@ from tqdm import tqdm
 from py7zr import pack_7zarchive, unpack_7zarchive
 
 from ballontranslator.utils.project import shared
-from .logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 from ballontranslator.utils.env.network_mirrors import rewrite_huggingface_url
 
 shutil.register_archive_format('7zip', pack_7zarchive, description='7zip archive')
@@ -48,7 +48,7 @@ def _notify_progress(progress_callback=None, **payload):
 
 def _configured_huggingface_mirror():
     try:
-        from ballontranslator.utils.config import pcfg
+        from ballontranslator.utils.project.config import pcfg
     except Exception:
         return None
     return getattr(getattr(pcfg, 'mirrors', None), 'huggingface', None)

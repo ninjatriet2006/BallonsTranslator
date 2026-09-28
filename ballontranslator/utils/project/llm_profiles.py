@@ -16,9 +16,9 @@ from typing import (
     get_type_hints,
 )
 
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.secret_store import SecretStore
-from ballontranslator.utils.structures import Config, field, nested_dataclass
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.system.secret_store import SecretStore
+from ballontranslator.utils.project.structures import Config, field, nested_dataclass
 
 
 LLM_TRANSLATOR_KEY = "LLMTranslator"

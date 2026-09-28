@@ -15,7 +15,7 @@ from qtpy.QtGui import (
 )
 from qtpy.QtWidgets import QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem
 
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     ProjectiveTextTransform,
     TEXT_TRANSFORM_PROJECTIVE_ROTATION_XY_MAX,
     TEXT_TRANSFORM_PROJECTIVE_ROTATION_XY_MIN,
@@ -26,7 +26,7 @@ from ballontranslator.utils.fontformat import (
     TEXT_TRANSFORM_SCALE_MIN,
 )
 
-from ...cursor import rotateCursorList
+from ballontranslator.ui.canvas.cursor import rotateCursorList
 from .modal import ModalPointTransform
 from ..shape_control import CONTROL_ITEM_DATA_KEY
 

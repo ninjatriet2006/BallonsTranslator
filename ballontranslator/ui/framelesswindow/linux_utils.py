@@ -1,6 +1,6 @@
 # coding: utf-8
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 # coding: utf-8
 from qtpy.QtCore import QObject, QEvent

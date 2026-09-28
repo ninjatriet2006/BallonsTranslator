@@ -4,10 +4,10 @@ import numpy as np
 import cv2
 from typing import List, Tuple
 
-from ballontranslator.utils.textblock import TextBlock
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.text.textblock import TextBlock
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 
-from ballontranslator.utils.registry import Registry
+from ballontranslator.utils.project.registry import Registry
 TEXTDETECTORS = Registry('textdetectors')
 register_textdetectors = TEXTDETECTORS.register_module
 

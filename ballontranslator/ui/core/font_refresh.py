@@ -10,18 +10,18 @@ from qtpy.QtCore import QObject, QThread, QTimer, Signal
 from qtpy.QtGui import QFontDatabase
 from qtpy.QtWidgets import QApplication
 
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.font_refresh import (
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.fonts.font_refresh import (
     FontconfigRefresh, invalidate_qt_fonts, log_font_refresh_debug, refresh_font_registry,
     reinitialize_current_fontconfig, runtime_font_refresh_supported, scan_custom_fonts,
 )
-from ballontranslator.utils.font_registry import load_custom_group_table, load_system_alias_table
-from ballontranslator.utils.message import create_info_dialog
+from ballontranslator.utils.fonts.font_registry import load_custom_group_table, load_system_alias_table
+from ballontranslator.utils.project.message import create_info_dialog
 from ballontranslator.ui.text_engine.font_family import register_qt_font_family_aliases
 from ballontranslator.ui.text_engine.layout import clear_font_metrics_cache
 
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 
 
 class _FontPreparation(QThread):

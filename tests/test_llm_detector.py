@@ -5,19 +5,19 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 from ballontranslator.modules.textdetector.base import TEXTDETECTORS
-from ballontranslator.modules.textdetector.detector_llm import (
+from ballontranslator.modules.textdetector.llm.detector_llm import (
     LLMDetector,
     _clean_json_text,
     _repair_json_text,
     _parse_box_coordinates,
     extract_stroke_mask,
 )
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.llm_profiles import (
     LLM_DETECTOR_KEY,
     LLMProfile,
 )
-from ballontranslator.utils.textblock import TextBlock
+from ballontranslator.utils.text.textblock import TextBlock
 
 
 class TestLLMDetector(unittest.TestCase):
@@ -203,7 +203,7 @@ class TestLLMDetector(unittest.TestCase):
         self.assertEqual(args['messages'], messages)
 
     def test_custom_vision_prompt_incorporated(self):
-        from ballontranslator.modules.textdetector.detector_llm import DETECTOR_USER_PROMPT
+        from ballontranslator.modules.textdetector.llm.detector_llm import DETECTOR_USER_PROMPT
         profile = LLMProfile(
             id='test_vision_profile',
             name='Test Vision',
@@ -227,7 +227,7 @@ class TestLLMDetector(unittest.TestCase):
         self.assertEqual(detector._prompt(profile, 'override'), 'override')
 
     def test_detector_prompts_assembled(self):
-        from ballontranslator.modules.textdetector.detector_llm import (
+        from ballontranslator.modules.textdetector.llm.detector_llm import (
             assemble_detector_system_prompt,
             DETECTOR_USER_PROMPT,
         )
@@ -309,7 +309,7 @@ class TestLLMDetector(unittest.TestCase):
 
     def test_local_slicing_fallback_multiline(self):
         """When LLM does not provide lines, multiline text must be sliced into child boxes automatically."""
-        from ballontranslator.modules.textdetector.detector_llm import slice_block_into_child_lines
+        from ballontranslator.modules.textdetector.llm.detector_llm import slice_block_into_child_lines
 
         roi = np.full((100, 100, 3), 255, dtype=np.uint8)
         # Horizontal slicing: 3 lines

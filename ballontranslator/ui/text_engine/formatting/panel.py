@@ -33,17 +33,17 @@ from qtpy.QtGui import (
     QTextCursor,
 )
 
-from ballontranslator.utils import shared
-from ballontranslator.utils import config as C
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project import config as C
+from ballontranslator.utils.fonts.fontformat import (
     FontFormat,
     FontWeight,
     LineSpacingType,
     coerce_font_weight,
     font_weight_to_qt,
 )
-from ballontranslator.utils.font_registry import FontEntry
-from ballontranslator.utils.font_refresh import runtime_font_refresh_supported
+from ballontranslator.utils.fonts.font_registry import FontEntry
+from ballontranslator.utils.fonts.font_refresh import runtime_font_refresh_supported
 from ...custom_widget import (
     AlignmentChecker,
     CheckableLabel,
@@ -54,8 +54,8 @@ from ...custom_widget import (
     TextCheckerLabel,
     Widget,
 )
-from ...icon_rendering import render_svg_pixmap
-from ...misc import themed_icon_path
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
 from ..item import TextBlkItem
 from ..font_family import qfont_with_family
 from ..annotations import (
@@ -78,7 +78,7 @@ from .commands import (
     handle_ffmt_change,
     restore_canvas_view_focus,
 )
-from ... import shared_widget as SW
+from ballontranslator.ui.widgets import shared_widget as SW
 
 class LineEdit(QLineEdit):
 

@@ -1,4 +1,4 @@
-from ballontranslator.ui.canvas import Canvas
+from ballontranslator.ui.canvas.canvas import Canvas
 
 canvas: Canvas = None
 st_manager = None

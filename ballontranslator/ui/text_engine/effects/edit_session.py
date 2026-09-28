@@ -5,9 +5,9 @@ from typing import Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 from qtpy.QtCore import QCoreApplication
 
-from ballontranslator.utils import config as C
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.project import config as C
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.text.text_effects import (
     EffectPaint,
     FilterEffect,
     GeneratedEffectPaint,
@@ -37,7 +37,7 @@ from .image_generation import (
     prepare_image_generation_context,
 )
 
-from ... import shared_widget as SW
+from ballontranslator.ui.widgets import shared_widget as SW
 from ..editing.commands import SetTextEffectStackCommand
 
 if TYPE_CHECKING:

@@ -10,10 +10,10 @@ try:
 except ImportError:
     from qtpy.QtWidgets import QUndoCommand
 
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     LineSpacingType, ProjectiveTextTransform, TextTransformStack, px2pt,
 )
-from ... import shared_widget as SW
+from ballontranslator.ui.widgets import shared_widget as SW
 from ..item import TextBlkItem
 from ..annotations import apply_line_spacing, line_spacing_values
 

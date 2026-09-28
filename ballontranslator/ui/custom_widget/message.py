@@ -6,7 +6,7 @@ from qtpy.QtWidgets import QDialog, QLabel, QHBoxLayout, QVBoxLayout, QMessageBo
 from qtpy.QtGui import QCloseEvent, QShowEvent, QMoveEvent
 from qtpy.QtCore import Qt, Signal
 
-from ballontranslator.utils.shared import remove_from_runtime_widget_set, add_to_runtime_widget_set
+from ballontranslator.utils.project.shared import remove_from_runtime_widget_set, add_to_runtime_widget_set
 from .widget import Widget
 
 

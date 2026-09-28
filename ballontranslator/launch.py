@@ -67,8 +67,8 @@ def disable_bundled_windows_user_site() -> list:
 
 disable_bundled_windows_user_site()
 
-import ballontranslator.utils.shared as shared # Earlier import of shared to use default for config_path argument
-from ballontranslator.utils.version import APP_VERSION
+import ballontranslator.utils.project.shared as shared # Earlier import of shared to use default for config_path argument
+from ballontranslator.utils.system.version import APP_VERSION
 
 os.environ['NUMBA_CACHE_DIR'] = osp.join(shared.cache_dir, 'numba')
 
@@ -126,7 +126,7 @@ def restart():
 
 
 def setup_locks():
-    from ballontranslator.utils.lock import RUNTIME_LOCKS
+    from ballontranslator.utils.system.lock import RUNTIME_LOCKS
     from qtpy.QtCore import QMutex
     RUNTIME_LOCKS['model_loading'] = QMutex()
 
@@ -201,7 +201,7 @@ def core_requirements_env(config_path: str) -> dict:
     True
     """
 
-    from ballontranslator.utils.network_mirrors import (
+    from ballontranslator.utils.env.network_mirrors import (
         installer_env_with_pypi_mirror,
         read_saved_pypi_mirror,
     )
@@ -229,20 +229,20 @@ def main():
 
     preload_msvc_runtime()
 
-    from ballontranslator.utils.logger import setup_logging, logger as LOGGER
-    from ballontranslator.utils.network_mirrors import auto_fill_network_mirrors
+    from ballontranslator.utils.system.logger import setup_logging, logger as LOGGER
+    from ballontranslator.utils.env.network_mirrors import auto_fill_network_mirrors
     setup_logging(shared.LOGGING_PATH)
     ensure_resource_theme_files(APP_DIR, LOGGER)
     updated_mirrors = auto_fill_network_mirrors(args.config_path, LOGGER)
 
-    from ballontranslator.utils.core_requirements import ensure_core_requirements
+    from ballontranslator.utils.env.core_requirements import ensure_core_requirements
     if ensure_core_requirements(APP_DIR, env=core_requirements_env(args.config_path)):
         print('Core requirements updated. Restarting...')
         restart()
         return
 
-    from ballontranslator.utils.io_utils import find_all_files_recursive
-    from ballontranslator.utils import config as program_config
+    from ballontranslator.utils.system.io_utils import find_all_files_recursive
+    from ballontranslator.utils.project import config as program_config
 
     from qtpy.QtCore import QTranslator, QLocale, Qt, QTimer
     shared.args = args
@@ -335,7 +335,7 @@ def main():
                 QFontDatabase.addApplicationFont(str(Path(fp).resolve()))
         system_families = sorted(font_database.families(), key=str.casefold)
 
-    from ballontranslator.utils.font_registry import (
+    from ballontranslator.utils.fonts.font_registry import (
         build_font_registry,
         ensure_font_registry_overrides,
     )
@@ -381,7 +381,7 @@ def main():
     setup_locks()
 
     from ballontranslator.ui.mainwindow import MainWindow
-    from ballontranslator.utils.message import create_info_dialog
+    from ballontranslator.utils.project.message import create_info_dialog
     ballontrans = MainWindow(app, config, open_dir=args.proj_dir, **vars(args))
     delete_on_close = getattr(Qt, 'WidgetAttribute', Qt).WA_DeleteOnClose
     # Destroy the Qt window tree before SIP performs interpreter-exit cleanup.

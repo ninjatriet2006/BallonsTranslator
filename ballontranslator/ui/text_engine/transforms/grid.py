@@ -7,8 +7,8 @@ import numpy as np
 from qtpy.QtCore import QPointF, QRectF
 from qtpy.QtGui import QPainterPath
 
-from ballontranslator.utils.fontformat import GridTextTransform
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.fonts.fontformat import GridTextTransform
+from ballontranslator.utils.system.logger import logger as LOGGER
 
 
 _numba_inverse_grid_arrays = None

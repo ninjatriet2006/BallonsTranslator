@@ -13,8 +13,8 @@ from qtpy.QtCore import (
 from qtpy.QtGui import QMouseEvent, QResizeEvent, QWheelEvent, QColor
 
 
-from ballontranslator.utils.shared import CONFIG_FONTSIZE_CONTENT
-from ballontranslator.utils import shared
+from ballontranslator.utils.project.shared import CONFIG_FONTSIZE_CONTENT
+from ballontranslator.utils.project import shared
 
 
 class FadeLabel(QLabel):

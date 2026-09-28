@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from ballontranslator.modules.lazy_registry import _scan_file, validate_lazy_module_specs
-from ballontranslator.utils.registry import ModuleSpec
+from ballontranslator.utils.project.registry import ModuleSpec
 
 
 class LazyMetadataTests(unittest.TestCase):

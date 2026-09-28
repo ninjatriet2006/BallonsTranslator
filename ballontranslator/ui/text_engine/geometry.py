@@ -20,12 +20,12 @@ from qtpy.QtWidgets import (
     QStyleOptionGraphicsItem,
 )
 
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     GridTextTransform,
     ProjectiveTextTransform,
     TextTransformStack,
 )
-from ballontranslator.utils.textblock import TextAlignment
+from ballontranslator.utils.text.textblock import TextAlignment
 from .rendering.surface import NonlinearTextSurfaceRenderer
 from .rendering.glyph_slant import GlyphSlantLayoutRenderer
 from .rendering.raster import (
@@ -51,7 +51,7 @@ class TextItemGeometryController:
     layout calls are explicit host boundaries so new transform stages do
     not need to grow ``TextBlkItem`` itself.
 
-    >>> from ballontranslator.utils.fontformat import ProjectiveTextTransform
+    >>> from ballontranslator.utils.fonts.fontformat import ProjectiveTextTransform
     >>> ProjectiveTextTransform().is_neutral()
     True
     """

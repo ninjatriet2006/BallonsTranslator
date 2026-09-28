@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 if TYPE_CHECKING:
-    from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+    from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 
 
 HISTORY_LOW_WATER_RATIO = 0.50

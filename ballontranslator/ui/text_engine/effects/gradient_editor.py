@@ -33,9 +33,9 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils.text_effects import GradientStop, LinearGradientPaint
+from ballontranslator.utils.text.text_effects import GradientStop, LinearGradientPaint
 
-from ...misc import themed_icon_path
+from ballontranslator.ui.core.misc import themed_icon_path
 from .paint import paint_effect_paint_preview
 from ..transforms.controls import TransformDragLabel
 

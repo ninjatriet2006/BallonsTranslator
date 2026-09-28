@@ -13,10 +13,10 @@ from ballontranslator.ui.core.funcmaps import get_maskseg_method
 from .packageinstall_thread import PackageInstallThread
 from ballontranslator.ui.package_manager import create_package_manager
 from ballontranslator.ui.dialogs.torch_install_dialog import confirm_torch_install_device
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.registry import LazyModuleError, Registry
-from ballontranslator.utils.imgproc_utils import enlarge_window, get_block_mask
-from ballontranslator.utils.io_utils import text_is_empty
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.project.registry import LazyModuleError, Registry
+from ballontranslator.utils.system.imgproc_utils import enlarge_window, get_block_mask
+from ballontranslator.utils.system.io_utils import text_is_empty
 from ballontranslator.modules.translators import MissingTranslatorParams
 from ballontranslator.modules.exceptions import (
     LLMApiKeyRequiredError,
@@ -32,22 +32,22 @@ from ballontranslator.modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR
     BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, merge_config_module_params
 import ballontranslator.modules as modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
-from ballontranslator.utils.textblock import TextBlock, sort_regions
-from ballontranslator.utils import shared
-from ballontranslator.utils.message import create_error_dialog, create_info_dialog
-from ballontranslator.utils.download_util import DownloadCancelled, sizeof_fmt
+from ballontranslator.utils.text.textblock import TextBlock, sort_regions
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.message import create_error_dialog, create_info_dialog
+from ballontranslator.utils.system.download_util import DownloadCancelled, sizeof_fmt
 from ballontranslator.modules.prepare_local_files import MissingDependency, ensure_module_files
-from ballontranslator.utils.py_package_manager import (
+from ballontranslator.utils.env.py_package_manager import (
     MissingModuleRequirements,
     collect_missing_module_requirements,
 )
 from ballontranslator.ui.custom_widget import ImgtransProgressMessageBox, ParamComboBox, ProgressMessageBox
 from ballontranslator.ui.configpanel import ConfigPanel
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-from ballontranslator.utils.config import pcfg, RunStatus, save_config, LLMTranslateContext
-from ballontranslator.utils.llm_profiles import LLM_DETECTOR_KEY, LLM_INPAINT_KEY, LLM_OCR_KEY
-from ballontranslator.utils.global_callbacks import register_global_callback
-from ballontranslator.utils.stage_auditor import StageAuditor, StageIssue, is_safety_refusal_error
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.project.config import pcfg, RunStatus, save_config, LLMTranslateContext
+from ballontranslator.utils.project.llm_profiles import LLM_DETECTOR_KEY, LLM_INPAINT_KEY, LLM_OCR_KEY
+from ballontranslator.utils.project.global_callbacks import register_global_callback
+from ballontranslator.utils.project.stage_auditor import StageAuditor, StageIssue, is_safety_refusal_error
 cfg_module = pcfg.module
 
 

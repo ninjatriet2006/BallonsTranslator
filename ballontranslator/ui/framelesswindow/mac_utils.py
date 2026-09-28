@@ -11,7 +11,7 @@ from Quartz.CoreGraphics import (CGEventCreateMouseEvent,
 
 QT_VERSION = tuple(int(v) for v in qVersion().split('.'))
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 class MacMoveResize:
     """ Tool class for moving and resizing Mac OS window """

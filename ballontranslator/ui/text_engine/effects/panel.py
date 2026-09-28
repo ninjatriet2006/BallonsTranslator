@@ -14,9 +14,9 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
-from ballontranslator.utils.fontformat import FontFormat
-from ballontranslator.utils.raster_assets import RasterAssetRef
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.fonts.fontformat import FontFormat
+from ballontranslator.utils.system.raster_assets import RasterAssetRef
+from ballontranslator.utils.text.text_effects import (
     FilterEffect,
     GlowEffect,
     HollowEffect,
@@ -30,9 +30,9 @@ from ballontranslator.utils.text_effects import (
     without_project_raster_effects,
 )
 
-from ... import shared_widget as SW
+from ballontranslator.ui.widgets import shared_widget as SW
 from ...custom_widget import PanelArea
-from ...misc import themed_icon_path
+from ballontranslator.ui.core.misc import themed_icon_path
 from .cards import (
     AlphaMaskCard,
     EffectNumericControl,
@@ -748,8 +748,8 @@ class TextEffectPanel(PanelArea):
             LLMBaseURLRequiredError,
             LLMModelRequiredError,
         )
-        from ballontranslator.utils import shared
-        from ballontranslator.utils.message import create_error_dialog
+        from ballontranslator.utils.project import shared
+        from ballontranslator.utils.project.message import create_error_dialog
 
         if isinstance(error, LLMApiKeyRequiredError):
             shared.show_llm_key_dialog_in_mainthread(

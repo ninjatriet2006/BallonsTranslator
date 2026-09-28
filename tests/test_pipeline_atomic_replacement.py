@@ -2,9 +2,9 @@ import unittest
 from unittest import mock
 import numpy as np
 
-from ballontranslator.utils.textblock import TextBlock
-from ballontranslator.utils.fontformat import FontFormat
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.text.textblock import TextBlock
+from ballontranslator.utils.fonts.fontformat import FontFormat
+from ballontranslator.utils.project.config import pcfg
 from ballontranslator.ui.mainwindow import MainWindow
 
 

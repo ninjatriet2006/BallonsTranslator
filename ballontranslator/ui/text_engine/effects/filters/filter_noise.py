@@ -10,7 +10,7 @@ from ballontranslator.ui.text_engine.effects.filters._procedural import (
     coordinate_noise,
 )
 from ballontranslator.ui.text_engine.effects.filters.registry import FilterContext
-from ballontranslator.utils.text_effects import FilterScalar
+from ballontranslator.utils.text.text_effects import FilterScalar
 
 
 FILTER_META = {

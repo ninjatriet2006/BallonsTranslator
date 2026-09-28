@@ -28,8 +28,8 @@ from ...custom_widget import (
     SmallParamLabel,
 )
 from ...custom_widget.combobox import BottomBorderComboBox
-from ...adaptive_wrap_layout import AdaptiveWrapLayout
-from ballontranslator.utils.fontformat import FontFormat
+from ballontranslator.ui.core.adaptive_wrap_layout import AdaptiveWrapLayout
+from ballontranslator.utils.fonts.fontformat import FontFormat
 from ..annotations import (
     FONT_FEATURES_AVAILABLE,
     LIGATURE_AXIS_VALUES,

@@ -7,7 +7,7 @@ from typing import Callable, Tuple
 from qtpy.QtCore import QCoreApplication, QRectF
 from qtpy.QtGui import QTransform
 
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     TEXT_TRANSFORM_BEND_MAX,
     TEXT_TRANSFORM_BEND_MIN,
     TEXT_TRANSFORM_GLYPH_SLANT_MAX,

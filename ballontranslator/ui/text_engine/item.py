@@ -19,17 +19,17 @@ from qtpy.QtGui import (QKeyEvent, QKeySequence, QFont, QTextCursor,
                        QBrush, QFontMetrics, QPen,
                        QTextBlockFormat)
 
-from ballontranslator.utils.textblock import TextBlock
-from ballontranslator.utils.text_alpha_mask import TextAlphaMask
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.text.textblock import TextBlock
+from ballontranslator.utils.text.text_alpha_mask import TextAlphaMask
+from ballontranslator.utils.text.text_effects import (
     SolidPaint,
     TextEffect,
     TextEffectStack,
     primary_stroke,
     with_primary_stroke,
 )
-from ballontranslator.utils.imgproc_utils import xywh2xyxypoly
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.system.imgproc_utils import xywh2xyxypoly
+from ballontranslator.utils.fonts.fontformat import (
     FontFormat,
     FontWeight,
     LineSpacingType,
@@ -43,7 +43,7 @@ from .font_family import (
     qfont_with_family,
 )
 from .editing.context_menu import create_text_edit_context_menu
-from ..misc import td_pattern, table_pattern
+from ballontranslator.ui.core.misc import td_pattern, table_pattern
 from .horizontal_layout import HorizontalTextDocumentLayout
 from .vertical_layout import VerticalTextDocumentLayout
 from .effects.renderer import TextEffectRenderer

@@ -5,7 +5,7 @@ from functools import cached_property, lru_cache
 from qtpy.QtCore import QLineF, QPointF, Qt
 from qtpy.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 
 def _icon_path(filename: str) -> str:

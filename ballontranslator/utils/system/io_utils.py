@@ -5,7 +5,7 @@ from typing import List, Union
 import base64
 import traceback
 
-from .logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 import requests
 from PIL import Image
 import PIL

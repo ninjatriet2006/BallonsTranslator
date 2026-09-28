@@ -14,10 +14,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils.fontformat import FontFormat, TextTransformStack
+from ballontranslator.utils.fonts.fontformat import FontFormat, TextTransformStack
 
 from ...custom_widget import PanelArea
-from ...misc import themed_icon_path
+from ballontranslator.ui.core.misc import themed_icon_path
 from .controls import (
     CommittedTransformControl,
     TransformParameterPanel,

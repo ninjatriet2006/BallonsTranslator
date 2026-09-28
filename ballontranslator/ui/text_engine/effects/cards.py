@@ -43,14 +43,14 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.llm_profiles import profile_by_id
-from ballontranslator.utils.text_alpha_mask import (
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.llm_profiles import profile_by_id
+from ballontranslator.utils.text.text_alpha_mask import (
     ALPHA_BRUSH_MAX_DIAMETER,
     ALPHA_BRUSH_MIN_DIAMETER,
     TextAlphaMask,
 )
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.text.text_effects import (
     EffectPaint,
     FilterEffect,
     GeneratedEffectPaint,
@@ -71,10 +71,10 @@ from ballontranslator.utils.text_effects import (
 )
 
 from ...custom_widget.combobox import BottomBorderComboBox
-from ...icon_rendering import render_svg_pixmap
-from ...misc import themed_icon_path
-from ...llm_modality import LLM_MODALITY_IMAGE_COLOR
-from ...module_tool_button import (
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
+from ballontranslator.ui.core.llm_modality import LLM_MODALITY_IMAGE_COLOR
+from ballontranslator.ui.widgets.module_tool_button import (
     _add_bottom_menu_action,
     _add_bottom_menu_section,
     _add_bottom_submenu,

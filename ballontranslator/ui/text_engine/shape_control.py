@@ -20,7 +20,7 @@ from qtpy.QtGui import (
     QTransform,
 )
 
-from ..cursor import (
+from ballontranslator.ui.canvas.cursor import (
     resizeCursorList,
     resize_handle_scene_angle,
     rotateCursorList,

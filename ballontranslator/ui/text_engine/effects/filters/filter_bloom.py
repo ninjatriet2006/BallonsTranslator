@@ -13,7 +13,7 @@ from ballontranslator.ui.text_engine.effects.filters._gaussian import (
     unpremultiply_rgba_float32,
 )
 from ballontranslator.ui.text_engine.effects.filters.registry import FilterContext
-from ballontranslator.utils.text_effects import FilterScalar
+from ballontranslator.utils.text.text_effects import FilterScalar
 
 
 FILTER_META = {

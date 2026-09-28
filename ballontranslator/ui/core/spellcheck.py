@@ -12,10 +12,10 @@ from qtpy.QtWidgets import (
     QLineEdit, QDialog, QLabel, QWidget, QListWidgetItem, QTextEdit
 )
 
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.download_util import download_url_to_file
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.system.download_util import download_url_to_file
+from ballontranslator.utils.system.logger import logger as LOGGER
 
 # Match dictionary-checkable runs directly; CJK ranges act as separators so a
 # mixed token such as ``helo世界`` still checks its Latin portion.
@@ -462,7 +462,7 @@ class SpellCheckManager(QObject):
         if reply != QMessageBox.StandardButton.Yes:
             return False
 
-        from ballontranslator.ui.packageinstall_thread import PackageInstallThread
+        from ballontranslator.ui.threads.packageinstall_thread import PackageInstallThread
 
         progress = QProgressDialog(parent.tr("Installing pyspellchecker..."), None, 0, 0, parent)
         progress.setWindowModality(Qt.WindowModality.WindowModal)

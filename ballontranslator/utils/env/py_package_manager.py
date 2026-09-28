@@ -11,9 +11,9 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion
-from ballontranslator.utils import package_installer
-from ballontranslator.utils.package_installer import InstallResult
-from ballontranslator.utils.torch_install_helper import (
+from ballontranslator.utils.env import package_installer
+from ballontranslator.utils.env.package_installer import InstallResult
+from ballontranslator.utils.env.torch_install_helper import (
     TORCH_FAMILY_PACKAGES,
     TorchInstallRequest,
     detect_nvidia_gpus,

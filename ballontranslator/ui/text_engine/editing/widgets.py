@@ -10,8 +10,8 @@ import numpy as np
 from ...custom_widget import ScrollBar, Widget, SeparatorWidget
 from ..item import TextBlock
 from .context_menu import create_text_edit_context_menu
-from ballontranslator.utils.config import pcfg
-from ...spellcheck import (
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.ui.core.spellcheck import (
     SpellCheckHighlighter,
     SpellCheckManager,
     iter_spellcheck_words,

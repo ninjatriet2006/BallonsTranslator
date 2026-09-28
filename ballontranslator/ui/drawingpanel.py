@@ -8,26 +8,26 @@ from math import log
 import numpy as np
 import cv2
 
-from ballontranslator.utils.imgproc_utils import (
+from ballontranslator.utils.system.imgproc_utils import (
     enlarge_window,
     magic_wand_mask,
     magic_wand_preview_overlay,
     MagicWandFillMode,
 )
-from ballontranslator.utils.textblock_mask import canny_flood, connected_canny_flood
-from ballontranslator.utils.logger import logger
-from ballontranslator.utils.config import pcfg
-from .cursor import magic_wand_cursor
-from .funcmaps import get_maskseg_method
+from ballontranslator.utils.text.textblock_mask import canny_flood, connected_canny_flood
+from ballontranslator.utils.system.logger import logger
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.ui.canvas.cursor import magic_wand_cursor
+from ballontranslator.ui.core.funcmaps import get_maskseg_method
 from .module_manager import ModuleManager
-from .image_edit import ImageEditMode, PenShape, PixmapItem, StrokeImgItem
+from ballontranslator.ui.canvas.image_edit import ImageEditMode, PenShape, PixmapItem, StrokeImgItem
 from .custom_widget import Widget, SeparatorWidget, PaintQSlider, ColorPickerLabel
-from .canvas import Canvas
-from .misc import ndarray2pixmap, themed_icon_path
-from ballontranslator.utils.config import DrawPanelConfig, pcfg
-from ballontranslator.utils.shared import CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
-from ballontranslator.utils.logger import logger as LOGGER
-from .drawing_commands import InpaintUndoCommand, StrokeItemUndoCommand
+from ballontranslator.ui.canvas.canvas import Canvas
+from ballontranslator.ui.core.misc import ndarray2pixmap, themed_icon_path
+from ballontranslator.utils.project.config import DrawPanelConfig, pcfg
+from ballontranslator.utils.project.shared import CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.ui.canvas.drawing_commands import InpaintUndoCommand, StrokeItemUndoCommand
 from .text_engine.shape_control import CONTROL_ITEM_DATA_KEY
 
 INPAINT_BRUSH_COLOR = QColor(127, 0, 127, 127)

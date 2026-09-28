@@ -18,7 +18,7 @@ from qtpy import API
 USE_PYSIDE6 = API == 'pyside6'
 QT_VERSION = tuple(int(v) for v in qVersion().split('.'))
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 
 def getSystemAccentColor():

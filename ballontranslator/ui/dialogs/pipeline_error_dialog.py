@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils.stage_auditor import StageIssue
+from ballontranslator.utils.project.stage_auditor import StageIssue
 from ballontranslator.ui.framelesswindow import DialogCloseButton, OutsideClickFramelessMixin
 
 

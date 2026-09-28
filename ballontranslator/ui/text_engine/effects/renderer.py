@@ -19,11 +19,11 @@ from qtpy.QtGui import (
 )
 from qtpy.QtWidgets import QStyle, QStyleOptionGraphicsItem, QWidget
 
-from ballontranslator.utils.fontformat import pt2px
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.raster_assets import RasterAssetRef
-from ballontranslator.utils.text_alpha_mask import TextAlphaMask
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.fonts.fontformat import pt2px
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.system.raster_assets import RasterAssetRef
+from ballontranslator.utils.text.text_alpha_mask import TextAlphaMask
+from ballontranslator.utils.text.text_effects import (
     FilterEffect,
     GlowEffect,
     HollowEffect,
@@ -40,7 +40,7 @@ from ballontranslator.utils.text_effects import (
     hollow_effect,
     primary_stroke,
 )
-from ...misc import ndarray2pixmap, pixmap2ndarray
+from ballontranslator.ui.core.misc import ndarray2pixmap, pixmap2ndarray
 from ..horizontal_layout import HorizontalTextDocumentLayout
 from ..vertical_layout import VerticalTextDocumentLayout
 from .alpha_mask import render_text_alpha_mask

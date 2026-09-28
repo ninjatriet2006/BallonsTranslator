@@ -1,9 +1,9 @@
 import os
 
 from ballontranslator.modules.package_import_names import PACKAGE_IMPORT_NAMES
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.network_mirrors import installer_env_with_pypi_mirror
-from ballontranslator.utils.py_package_manager import PyPackageManager
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.env.network_mirrors import installer_env_with_pypi_mirror
+from ballontranslator.utils.env.py_package_manager import PyPackageManager
 
 
 def create_package_manager() -> PyPackageManager:

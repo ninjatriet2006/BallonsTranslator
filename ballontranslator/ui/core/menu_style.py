@@ -15,7 +15,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 
 _MENU_CORNER_RADIUS = 8

@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlparse
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Tuple
 
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 
 
 BACKENDS = ('auto', 'pip', 'uv', 'conda-pip')

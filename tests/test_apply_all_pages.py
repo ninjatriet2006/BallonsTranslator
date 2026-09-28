@@ -4,9 +4,9 @@ from unittest import mock
 from qtpy.QtCore import QObject
 from qtpy.QtWidgets import QApplication, QMessageBox, QCheckBox
 
-from ballontranslator.utils.fontformat import FontFormat
-from ballontranslator.utils.textblock import TextBlock
-from ballontranslator.utils import shared
+from ballontranslator.utils.fonts.fontformat import FontFormat
+from ballontranslator.utils.text.textblock import TextBlock
+from ballontranslator.utils.project import shared
 
 app = QApplication.instance()
 if app is None:

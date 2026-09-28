@@ -10,9 +10,9 @@ from ballontranslator.ui.framelesswindow import (
     OutsideClickFramelessMixin,
     DialogCloseButton,
 )
-from ballontranslator.utils import shared
-from ballontranslator.utils.shared import LEGACY_FONTS
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.shared import LEGACY_FONTS
+from ballontranslator.utils.project.config import pcfg
 
 
 class FontExcludeDialog(OutsideClickFramelessMixin, QDialog):

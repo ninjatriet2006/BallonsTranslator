@@ -2,10 +2,10 @@ import numpy as np
 import cv2
 from typing import List
 
-from ballontranslator.utils.registry import Registry
-from ballontranslator.utils.textblock_mask import extract_ballon_mask
-from ballontranslator.utils.imgproc_utils import enlarge_window, rotate_polygons, xywh2xyxypoly
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.project.registry import Registry
+from ballontranslator.utils.text.textblock_mask import extract_ballon_mask
+from ballontranslator.utils.system.imgproc_utils import enlarge_window, rotate_polygons, xywh2xyxypoly
+from ballontranslator.utils.project.config import pcfg
 
 from ..base import BaseModule, soft_empty_cache, require_torch
 from ..textdetector import TextBlock

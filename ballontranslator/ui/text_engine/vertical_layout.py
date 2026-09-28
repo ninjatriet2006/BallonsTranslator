@@ -19,9 +19,9 @@ from qtpy.QtGui import (
     QTransform,
 )
 
-from ballontranslator.utils import shared as C
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.fontformat import FontFormat, TextAlignment
+from ballontranslator.utils.project import shared as C
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.fonts.fontformat import FontFormat, TextAlignment
 from .annotations import (
     FONT_FEATURES_AVAILABLE,
     emphasis_values,

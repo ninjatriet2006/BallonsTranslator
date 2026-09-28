@@ -7,10 +7,10 @@ except:
 
 from typing import Union, Tuple, List
 import numpy as np
-from ballontranslator.utils.logger import logger
+from ballontranslator.utils.system.logger import logger
 
-from ballontranslator.ui.image_edit import ImageEditMode, PixmapItem, DrawingLayer, StrokeImgItem
-from ballontranslator.ui.canvas import Canvas, TextBlkItem
+from ballontranslator.ui.canvas.image_edit import ImageEditMode, PixmapItem, DrawingLayer, StrokeImgItem
+from ballontranslator.ui.canvas.canvas import Canvas, TextBlkItem
 from ballontranslator.ui.text_engine.editing.widgets import TransPairWidget
 
 

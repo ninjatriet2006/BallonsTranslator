@@ -9,7 +9,7 @@ from xcffib.xproto import (ButtonIndex, ButtonMask, ButtonReleaseEvent,
                            ClientMessageData, ClientMessageEvent, EventMask,
                            xprotoExtension)
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 class WindowMessage(Enum):
     """ Window message enum class """

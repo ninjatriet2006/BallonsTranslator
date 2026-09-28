@@ -24,15 +24,15 @@ from qtpy.QtGui import (
 )
 
 from ballontranslator.ui.custom_widget import Widget, PaintQSlider
-from ballontranslator.ui.module_tool_button import ModuleSelectionWidget
-from ballontranslator.ui.misc import themed_icon_path
-from ballontranslator.ui.llm_modality import (
+from ballontranslator.ui.widgets.module_tool_button import ModuleSelectionWidget
+from ballontranslator.ui.core.misc import themed_icon_path
+from ballontranslator.ui.core.llm_modality import (
     LLM_MODALITY_IMAGE,
     LLM_MODALITY_TEXT,
     LLM_MODALITY_VISION,
     LLM_MODALITY_VISION_COLOR,
 )
-from ballontranslator.utils.shared import (
+from ballontranslator.utils.project.shared import (
     BOTTOMBAR_HEIGHT,
     LEFTBAR_WIDTH,
     LEFTBTN_WIDTH,
@@ -40,8 +40,8 @@ from ballontranslator.utils.shared import (
     WINDOW_BORDER_WIDTH,
 )
 from ballontranslator.ui.framelesswindow import FramelessMoveResize
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils import shared
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project import shared
 if shared.FLAG_QT6:
     from qtpy.QtGui import QAction
 else:

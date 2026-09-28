@@ -2,9 +2,9 @@ import unittest
 from qtpy.QtWidgets import QApplication
 from qtpy.QtCore import Qt
 
-from ballontranslator.utils.config import pcfg, ModuleConfig
-from ballontranslator.utils.llm_profiles import LLMProfile, _normalize_profile_thinking
-from ballontranslator.modules.translators.trans_llm import LLMTranslator
+from ballontranslator.utils.project.config import pcfg, ModuleConfig
+from ballontranslator.utils.project.llm_profiles import LLMProfile, _normalize_profile_thinking
+from ballontranslator.modules.translators.llm.trans_llm import LLMTranslator
 from ballontranslator.modules.translators.llm_translation_contract import render_user_prompt
 from ballontranslator.ui.configpanel import ConfigTextLabel, ConfigPanel
 

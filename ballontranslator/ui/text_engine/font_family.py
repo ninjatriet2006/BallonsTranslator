@@ -7,9 +7,9 @@ from typing import Callable, Iterable, Sequence
 
 from qtpy.QtGui import QFont, QTextCharFormat, QTextCursor, QTextDocument
 
-from ballontranslator.utils import shared
-from ballontranslator.utils.font_registry import normalize_key
-from ballontranslator.utils.fontformat import font_weight_from_qt
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.fonts.font_registry import normalize_key
+from ballontranslator.utils.fonts.fontformat import font_weight_from_qt
 
 
 _QT_FAMILY_BY_PROJECT_NAME: dict[str, str] = {}

@@ -363,7 +363,7 @@ def parse_translation_response(
     try:
         data = json.loads(json_to_parse, strict=False)
     except Exception:
-        from ..textdetector.detector_llm import _repair_json_text
+        from ballontranslator.modules.textdetector.llm.detector_llm import _repair_json_text
         data = json.loads(_repair_json_text(json_to_parse), strict=False)
     page_summary = ''
     if isinstance(data, dict):

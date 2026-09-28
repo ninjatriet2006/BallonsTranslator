@@ -5,9 +5,9 @@ import os.path as osp
 from qtpy.QtGui import QPixmap,  QColor, QImage, QTextDocument, QTextCursor
 from qtpy.QtCore import Qt, QPointF
 
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils import shared
-from ballontranslator.utils.structures import Tuple, Union, List, Dict, Config, field, nested_dataclass
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.structures import Tuple, Union, List, Dict, Config, field, nested_dataclass
 
 
 QKEY = Qt.Key

@@ -2,7 +2,7 @@ import unittest
 from qtpy.QtWidgets import QApplication
 from qtpy.QtCore import Qt
 
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.utils.project.llm_profiles import (
     DEFAULT_DETECTOR_BOX_PROMPT,
     DEFAULT_DETECTOR_OCR_PROMPT,
     DEFAULT_INPAINT_PROMPT,
@@ -10,8 +10,8 @@ from ballontranslator.utils.llm_profiles import (
     DEFAULT_TRANSLATION_PROMPT,
     LLMProfile,
 )
-from ballontranslator.ui.module_parse_widgets import ParamWidget, ParamEditor
-from ballontranslator.ui.llm_profile_widgets import ProfileCardWidget
+from ballontranslator.ui.widgets.module_parse_widgets import ParamWidget, ParamEditor
+from ballontranslator.ui.widgets.llm_profile_widgets import ProfileCardWidget
 
 
 class TestLLMPromptsAndReset(unittest.TestCase):

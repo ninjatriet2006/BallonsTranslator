@@ -5,17 +5,17 @@ from qtpy.QtWidgets import QHBoxLayout, QSizePolicy, QComboBox, QStyledItemDeleg
 from qtpy.QtCore import Qt, QItemSelection, QSize, Signal, QUrl, QModelIndex, QRectF
 from qtpy.QtGui import QFont, QPainter, QTextCursor, QStandardItemModel, QStandardItem, QAbstractTextDocumentLayout, QColor, QPalette, QTextDocument, QTextCharFormat
 
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.ui.page_search_widget import SearchEditor, HighlightMatched, SEARCHRST_HIGHLIGHT_COLOR
-from ballontranslator.ui.misc import doc_replace
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.ui.widgets.page_search_widget import SearchEditor, HighlightMatched, SEARCHRST_HIGHLIGHT_COLOR
+from ballontranslator.ui.core.misc import doc_replace
+from ballontranslator.utils.project.config import pcfg
 from ballontranslator.ui.custom_widget import ProgressMessageBox, Widget, NoBorderPushBtn
 from ballontranslator.ui.text_engine.item import TextBlkItem, TextBlock
 from ballontranslator.ui.text_engine.annotations import load_rich_text_html, to_rich_text_html
 from ballontranslator.ui.text_engine.editing.widgets import TransPairWidget, SourceTextEdit
-from ballontranslator.ui.io_thread import ThreadBase
-from ballontranslator.utils import shared
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
+from ballontranslator.ui.threads.io_thread import ThreadBase
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 
 SEARCHRST_FONTSIZE = 10.3
 

@@ -21,13 +21,13 @@ try:
 except ImportError:
     from qtpy.QtGui import QUndoCommand
 
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-from ballontranslator.ui.bulk_page_summary_editor import (
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
+from ballontranslator.ui.dialogs.bulk_page_summary_editor import (
     BulkPageSummaryDialog,
 )
 from ballontranslator.ui.custom_widget import ScrollBar, ViewWidget
-from ballontranslator.ui.misc import themed_icon_path
+from ballontranslator.ui.core.misc import themed_icon_path
 
 
 class _ContextView(ViewWidget):

@@ -3,10 +3,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ballontranslator.utils import package_installer
-from ballontranslator.utils import shared
-from ballontranslator.utils.py_package_manager import PyPackageManager
-from ballontranslator.utils.torch_install_helper import (
+from ballontranslator.utils.env import package_installer
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.env.py_package_manager import PyPackageManager
+from ballontranslator.utils.env.torch_install_helper import (
     ALIYUN_PYPI_MIRROR,
     IntelXpuInfo,
     NvidiaGpuInfo,
@@ -39,7 +39,7 @@ class TorchInstallHelperTests(unittest.TestCase):
         self.assertEqual(request.backend, 'pip')
         self.assertEqual(
             request.requirements,
-            ['torch', 'torchvision', 'torchaudio', 'einops'],
+            ['torch', 'torchvision', 'einops'],
         )
         self.assertEqual(request.env['INDEX_URL'], 'https://download.pytorch.org/whl/xpu')
         self.assertNotIn('FIND_LINKS', request.env)
@@ -66,17 +66,31 @@ class TorchInstallHelperTests(unittest.TestCase):
         self.assertEqual(request.requirements, ['torch==2.7.1', 'torchvision'])
 
     def test_forced_cpu_keeps_plain_torch_install(self):
-        request = prepare_torch_install_request(
-            ['torch', 'einops'],
-            env={'PATH': '/bin'},
-            gpu_detector=lambda: [NvidiaGpuInfo('RTX 4090', 8.9)],
-            xpu_detector=lambda: [IntelXpuInfo('Intel Arc')],
-            torch_device='cpu',
-        )
+        with mock.patch('sys.platform', 'darwin'):
+            request = prepare_torch_install_request(
+                ['torch', 'einops'],
+                env={'PATH': '/bin'},
+                gpu_detector=lambda: [NvidiaGpuInfo('RTX 4090', 8.9)],
+                xpu_detector=lambda: [IntelXpuInfo('Intel Arc')],
+                torch_device='cpu',
+            )
 
-        self.assertIsNone(request.profile)
-        self.assertEqual(request.device, 'cpu')
-        self.assertEqual(request.requirements, ['torch', 'einops'])
+            self.assertIsNone(request.profile)
+            self.assertEqual(request.device, 'cpu')
+            self.assertEqual(request.requirements, ['torch', 'einops'])
+
+        with mock.patch('sys.platform', 'linux'):
+            request = prepare_torch_install_request(
+                ['torch', 'einops'],
+                env={'PATH': '/bin'},
+                gpu_detector=lambda: [NvidiaGpuInfo('RTX 4090', 8.9)],
+                xpu_detector=lambda: [IntelXpuInfo('Intel Arc')],
+                torch_device='cpu',
+            )
+
+            self.assertIsNotNone(request.profile)
+            self.assertEqual(request.profile.name, 'cpu')
+            self.assertEqual(request.device, 'cpu')
 
     def test_forced_cuda_uses_default_cuda_profile_without_probe_result(self):
         request = prepare_torch_install_request(
@@ -138,10 +152,10 @@ class TorchInstallHelperTests(unittest.TestCase):
             return [IntelXpuInfo('Intel Arc')]
 
         with mock.patch(
-            'ballontranslator.utils.torch_install_helper.detect_nvidia_gpus',
+            'ballontranslator.utils.env.torch_install_helper.detect_nvidia_gpus',
             side_effect=detect_nvidia,
         ), mock.patch(
-            'ballontranslator.utils.torch_install_helper.detect_intel_xpus',
+            'ballontranslator.utils.env.torch_install_helper.detect_intel_xpus',
             side_effect=detect_xpu,
         ):
             first = prepare_torch_install_request(['torch'], env={'PATH': '/bin'})
@@ -187,13 +201,13 @@ class TorchInstallHelperTests(unittest.TestCase):
         manager = PyPackageManager(backend='pip', env={'PATH': '/bin'})
 
         with mock.patch(
-            'ballontranslator.utils.torch_install_helper.detect_nvidia_gpus',
+            'ballontranslator.utils.env.torch_install_helper.detect_nvidia_gpus',
             return_value=[],
         ), mock.patch(
-            'ballontranslator.utils.torch_install_helper.detect_intel_xpus',
+            'ballontranslator.utils.env.torch_install_helper.detect_intel_xpus',
             return_value=[IntelXpuInfo('Intel Arc')],
         ), mock.patch(
-            'ballontranslator.utils.package_installer._pip_supports_raw_progress',
+            'ballontranslator.utils.env.package_installer._pip_supports_raw_progress',
             return_value=False,
         ):
             commands = manager.build_install_commands(['torch', 'einops'])
@@ -202,7 +216,6 @@ class TorchInstallHelperTests(unittest.TestCase):
         torch_command, other_command = commands
         self.assertIn('torch', torch_command)
         self.assertIn('torchvision', torch_command)
-        self.assertIn('torchaudio', torch_command)
         self.assertNotIn('einops', torch_command)
         self.assertIn('-i', torch_command)
         self.assertIn('https://download.pytorch.org/whl/xpu', torch_command)
@@ -212,8 +225,8 @@ class TorchInstallHelperTests(unittest.TestCase):
     def test_package_manager_forced_cpu_builds_plain_install_command(self):
         manager = PyPackageManager(backend='pip', env={'PATH': '/bin'})
 
-        with mock.patch(
-            'ballontranslator.utils.package_installer._pip_supports_raw_progress',
+        with mock.patch('sys.platform', 'darwin'), mock.patch(
+            'ballontranslator.utils.env.package_installer._pip_supports_raw_progress',
             return_value=False,
         ):
             commands = manager.build_install_commands(['torch', 'einops'], torch_device='cpu')
@@ -223,11 +236,23 @@ class TorchInstallHelperTests(unittest.TestCase):
         self.assertIn('einops', commands[0])
         self.assertNotIn('https://download.pytorch.org/whl/xpu', commands[0])
 
+        with mock.patch('sys.platform', 'linux'), mock.patch(
+            'ballontranslator.utils.env.package_installer._pip_supports_raw_progress',
+            return_value=False,
+        ):
+            commands = manager.build_install_commands(['torch', 'einops'], torch_device='cpu')
+
+        self.assertEqual(len(commands), 2)
+        torch_command, other_command = commands
+        self.assertIn('torch==2.10.0', torch_command)
+        self.assertIn('https://download.pytorch.org/whl/cpu', torch_command)
+        self.assertIn('einops', other_command)
+
     def test_package_manager_forced_cuda_version_builds_matching_command(self):
         manager = PyPackageManager(backend='pip', env={'PATH': '/bin'})
 
         with mock.patch(
-            'ballontranslator.utils.package_installer._pip_supports_raw_progress',
+            'ballontranslator.utils.env.package_installer._pip_supports_raw_progress',
             return_value=False,
         ):
             commands = manager.build_install_commands(
@@ -245,7 +270,7 @@ class TorchInstallHelperTests(unittest.TestCase):
         manager = PyPackageManager(backend='pip', env={'PATH': '/bin'})
 
         with mock.patch(
-            'ballontranslator.utils.package_installer._pip_supports_raw_progress',
+            'ballontranslator.utils.env.package_installer._pip_supports_raw_progress',
             return_value=False,
         ):
             commands = manager.build_install_commands(
@@ -281,7 +306,7 @@ class TorchInstallHelperTests(unittest.TestCase):
             '_import_available',
             return_value=False,
         ), mock.patch(
-            'ballontranslator.utils.py_package_manager._resolve_onnxruntime_requirement',
+            'ballontranslator.utils.env.py_package_manager._resolve_onnxruntime_requirement',
             return_value='onnxruntime-gpu>=1.27.0',
         ):
             missing = manager.missing_requirements(['onnxruntime', 'torch'])
@@ -303,7 +328,7 @@ class TorchInstallHelperTests(unittest.TestCase):
                 'executable',
                 str(python_path),
             ), mock.patch(
-                'ballontranslator.utils.package_installer._pip_supports_raw_progress',
+                'ballontranslator.utils.env.package_installer._pip_supports_raw_progress',
                 return_value=False,
             ):
                 commands = manager.build_install_commands(

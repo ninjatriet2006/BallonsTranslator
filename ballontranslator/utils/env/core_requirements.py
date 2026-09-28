@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
-from ballontranslator.utils import package_installer
+from ballontranslator.utils.env import package_installer
 
 
 CORE_IMPORT_PROBES = (
@@ -97,7 +97,7 @@ def check_core_requirements_file(requirements_file: Path) -> List[str]:
     if not requirements:
         return []
     try:
-        from ballontranslator.utils.py_package_manager import PyPackageManager
+        from ballontranslator.utils.env.py_package_manager import PyPackageManager
     except Exception as e:
         return [f'{requirements_file}: unable to inspect requirements: {e}']
     return [
@@ -129,7 +129,7 @@ def install_core_requirements(
     """Install the core requirements file through the shared installer.
 
     >>> from unittest import mock
-    >>> with mock.patch('ballontranslator.utils.package_installer.install') as install:
+    >>> with mock.patch('ballontranslator.utils.env.package_installer.install') as install:
     ...     install.return_value = 'ok'
     ...     install_core_requirements('/tmp/requirements.txt', backend='pip')
     'ok'

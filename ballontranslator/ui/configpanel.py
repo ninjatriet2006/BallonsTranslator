@@ -13,17 +13,17 @@ from qtpy.QtCore import Qt, Signal, QSize, QItemSelection, QTimer
 from qtpy.QtGui import QStandardItem, QStandardItemModel, QMouseEvent, QFont, QIntValidator, QValidator, QFocusEvent
 
 from .custom_widget import ConfigComboBox, NoBorderPushBtn, ScrollBar, Widget
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import OCRTextPostprocess, pcfg
-from ballontranslator.utils.version import APP_VERSION
-from ballontranslator.utils.network_mirrors import (
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import OCRTextPostprocess, pcfg
+from ballontranslator.utils.system.version import APP_VERSION
+from ballontranslator.utils.env.network_mirrors import (
     HUGGINGFACE_MIRROR_OPTIONS,
     PYPI_MIRROR_OPTIONS,
     display_options,
     mirror_from_display,
     mirror_to_display,
 )
-from ballontranslator.utils.shared import (
+from ballontranslator.utils.project.shared import (
     CONFIG_COMBOBOX_LONG,
     CONFIG_COMBOBOX_MIDEAN,
     CONFIG_COMBOBOX_SHORT,
@@ -37,15 +37,15 @@ from ballontranslator.utils.shared import (
     PROGRAM_PATH,
     TITLEBAR_HEIGHT,
 )
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 from ballontranslator.modules.lazy_registry import probe_torch_package
-from .llm_profile_widgets import LLMProfilesWidget
+from ballontranslator.ui.widgets.llm_profile_widgets import LLMProfilesWidget
 from .framelesswindow import (
     DialogCloseButton,
     FramelessWindow,
     OutsideClickFramelessMixin,
 )
-from ballontranslator.ui.spellcheck import DICTIONARY_URLS, SpellCheckManager, DictionaryManagerDialog, DictDownloadThread
+from ballontranslator.ui.core.spellcheck import DICTIONARY_URLS, SpellCheckManager, DictionaryManagerDialog, DictDownloadThread
 
 
 LAYOUT_SET_MINIMUM_SIZE = getattr(getattr(QLayout, 'SizeConstraint', QLayout), 'SetMinimumSize')

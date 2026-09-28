@@ -4,7 +4,7 @@ from qtpy.QtCore import QCoreApplication, Qt
 from qtpy.QtGui import QAction, QKeySequence
 from qtpy.QtWidgets import QApplication, QMenu, QWidget
 
-from ballontranslator.utils.config import pcfg
+from ballontranslator.utils.project.config import pcfg
 
 
 def create_text_edit_context_menu(

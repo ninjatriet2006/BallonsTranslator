@@ -8,9 +8,9 @@ import importlib.util
 import traceback
 from pathlib import Path
 
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils import shared
-from ballontranslator.utils.lock import aquire_model_loading_lock, release_model_loading_lock
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.system.lock import aquire_model_loading_lock, release_model_loading_lock
 
 
 GPUINTENSIVE_SET = {'cuda', 'mps', 'xpu', 'privateuseone'}
@@ -518,12 +518,23 @@ MODULE_SCRIPTS = {
 def import_module_registries(target_modules=None):
     # Eager import path kept for explicit compatibility/debug use only.
     def _load_module(module_dir: str, module_package: str, module_pattern: str) -> None:
-        if not os.path.isdir(module_dir):
+        p_dir = Path(module_dir)
+        if not p_dir.is_dir():
             return
-        modules = os.listdir(module_dir)
         pattern = re.compile(module_pattern)
-        for module_name in modules:
-            if pattern.match(module_name) is not None:
+        for sub in ('offline', 'online', 'llm'):
+            sub_p = p_dir / sub
+            if sub_p.is_dir():
+                for py_file in sorted(sub_p.rglob('*.py')):
+                    if not py_file.name.startswith('__') and pattern.match(py_file.name) is not None:
+                        rel_parts = py_file.relative_to(p_dir).with_suffix('').parts
+                        module = module_package + '.' + '.'.join(rel_parts)
+                        try:
+                            importlib.import_module(module)
+                        except Exception as e:
+                            LOGGER.warning(f'Failed to import {module}: {e}')
+        for module_name in sorted(os.listdir(module_dir)):
+            if pattern.match(module_name) is not None and not module_name.startswith('__'):
                 try:
                     module = module_package + '.' + module_name.replace('.py', '')
                     importlib.import_module(module)

@@ -15,8 +15,8 @@ from qtpy.QtGui import (
     QTransform,
 )
 
-from ballontranslator.utils import shared as C
-from ballontranslator.utils.fontformat import FontFormat, LineSpacingType
+from ballontranslator.utils.project import shared as C
+from ballontranslator.utils.fonts.fontformat import FontFormat, LineSpacingType
 from .layout import (
     SceneTextLayout,
     _block_cursor_position,

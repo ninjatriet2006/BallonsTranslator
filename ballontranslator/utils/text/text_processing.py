@@ -5,7 +5,7 @@ import os
 import re
 import traceback
 
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 
 HALF2FULL = {i: i + 0xFEE0 for i in range(0x21, 0x7F)}
 HALF2FULL[0x20] = 0x3000

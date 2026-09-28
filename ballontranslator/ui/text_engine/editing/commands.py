@@ -12,17 +12,17 @@ from ..item import TextBlkItem, TextBlock
 from ..annotations import prepare_ruby_insertion
 from ..rendering.indexing import _utf16_boundaries
 from .widgets import TransTextEdit, SourceTextEdit
-from ballontranslator.utils.fontformat import (
+from ballontranslator.utils.fonts.fontformat import (
     FontFormat,
     TextTransformStack,
 )
-from ballontranslator.utils.text_effects import TextEffectStack
-from ballontranslator.utils.text_alpha_mask import TextAlphaMask
-from ...misc import doc_replace, doc_replace_no_shift
+from ballontranslator.utils.text.text_effects import TextEffectStack
+from ballontranslator.utils.text.text_alpha_mask import TextAlphaMask
+from ballontranslator.ui.core.misc import doc_replace, doc_replace_no_shift
 from ..shape_control import TextBlkShapeControl
-from ...page_search_widget import PageSearchWidget, Matched
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-from ballontranslator.utils.text_processing import capitalize_sentences
+from ballontranslator.ui.widgets.page_search_widget import PageSearchWidget, Matched
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.text.text_processing import capitalize_sentences
 
 
 def propagate_user_edit(

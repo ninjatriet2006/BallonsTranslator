@@ -14,8 +14,8 @@ from typing import Callable, Mapping, Optional, Tuple
 
 import numpy as np
 
-from ballontranslator.utils.fontformat import TEXT_TRANSFORM_PRECISION
-from ballontranslator.utils.text_effects import FilterEffect, FilterScalar
+from ballontranslator.utils.fonts.fontformat import TEXT_TRANSFORM_PRECISION
+from ballontranslator.utils.text.text_effects import FilterEffect, FilterScalar
 
 
 LOGGER = logging.getLogger(__name__)

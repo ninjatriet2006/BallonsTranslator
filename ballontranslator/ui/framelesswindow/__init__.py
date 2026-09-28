@@ -4,7 +4,7 @@ from qtpy.QtCore import QEvent, QPointF, Qt
 from qtpy.QtGui import QColor, QMouseEvent, QPainter, QPalette, QPen
 from qtpy.QtWidgets import QAbstractButton, QApplication, QWidget
 
-from ballontranslator.utils import shared
+from ballontranslator.utils.project import shared
 
 if not shared.FLAG_QT6:
 

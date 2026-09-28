@@ -32,8 +32,8 @@ from ballontranslator.ui.framelesswindow import (
     FramelessWindow,
     OutsideClickFramelessMixin,
 )
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-from ballontranslator.utils.shared import ON_MACOS, ON_WINDOWS
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
+from ballontranslator.utils.project.shared import ON_MACOS, ON_WINDOWS
 
 
 PAGE_HEADING_PATTERN = re.compile(r'^### ([^\r\n]+)\r?$', re.MULTILINE)

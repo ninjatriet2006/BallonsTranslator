@@ -5,13 +5,13 @@ from unittest.mock import MagicMock, patch
 
 from qtpy.QtWidgets import QApplication
 
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.utils.project.llm_profiles import (
     LLMProfile,
     get_candidate_model_endpoints,
     _extract_model_ids,
     fetch_remote_models,
 )
-from ballontranslator.ui.llm_profile_widgets import (
+from ballontranslator.ui.widgets.llm_profile_widgets import (
     ProfileCardWidget,
     ModelFetchThread,
 )

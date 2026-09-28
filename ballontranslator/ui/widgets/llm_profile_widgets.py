@@ -33,18 +33,18 @@ except ImportError:
     from qtpy.QtWidgets import QAction
 
 from ballontranslator.ui.custom_widget import ParamComboBox, NoBorderPushBtn, ScrollBar
-from ballontranslator.ui.icon_rendering import render_svg_pixmap
-from ballontranslator.ui.llm_modality import (
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.llm_modality import (
     LLM_MODALITY_IMAGE_COLOR,
     LLM_MODALITY_TEXT_COLOR,
     LLM_MODALITY_VISION_COLOR,
     modality_badge_qcolor,
 )
-from ballontranslator.ui.misc import themed_icon_path
-from ballontranslator.ui.module_parse_widgets import ParamWidget, SecretParamWidget
-from ballontranslator.utils.shared import size2width
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.ui.core.misc import themed_icon_path
+from ballontranslator.ui.widgets.module_parse_widgets import ParamWidget, SecretParamWidget
+from ballontranslator.utils.project.shared import size2width
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.llm_profiles import (
     DEFAULT_DETECTOR_BOX_PROMPT,
     DEFAULT_DETECTOR_OCR_PROMPT,
     DEFAULT_INPAINT_PROMPT,

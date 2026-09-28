@@ -3,10 +3,10 @@ from copy import deepcopy
 import numpy as np
 import cv2
 
-from ballontranslator.utils.textblock import TextBlock
-from ballontranslator.utils.registry import Registry
-from ballontranslator.utils.config import OCRTextPostprocess, pcfg
-from ballontranslator.utils.text_processing import (
+from ballontranslator.utils.text.textblock import TextBlock
+from ballontranslator.utils.project.registry import Registry
+from ballontranslator.utils.project.config import OCRTextPostprocess, pcfg
+from ballontranslator.utils.text.text_processing import (
     apply_letter_case,
     substitute_keywords,
 )
@@ -113,7 +113,7 @@ class OCRBase(BaseModule):
         """Best-effort font detection after OCR text has been finalized."""
 
         try:
-            from ballontranslator.utils import font_detect
+            from ballontranslator.utils.fonts import font_detect
         except Exception:
             return
 

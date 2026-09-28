@@ -1,7 +1,7 @@
 from qtpy.QtGui import QColor
 
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils import shared
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project import shared
 
 
 def isDarkTheme():

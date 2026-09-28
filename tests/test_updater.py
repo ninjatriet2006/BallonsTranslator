@@ -4,8 +4,8 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from ballontranslator.utils import updater
-from ballontranslator.utils.version import _read_pyproject_version
+from ballontranslator.utils.system import updater
+from ballontranslator.utils.system.version import _read_pyproject_version
 
 
 def _write_update_root_files(root: Path, marker: str) -> None:
@@ -64,6 +64,8 @@ class UpdaterTests(unittest.TestCase):
 
     def test_check_latest_release_does_not_apply_update(self):
         class FakeUpdater(updater.BallonsTranslatorUpdater):
+            ENABLE_UPDATER = True
+
             def query_latest_release(self):
                 return updater.ReleaseInfo(
                     tag_name='v1.4.3',

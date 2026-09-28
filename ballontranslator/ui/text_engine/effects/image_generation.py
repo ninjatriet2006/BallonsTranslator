@@ -14,15 +14,15 @@ from ballontranslator.modules.llm_image import (
     LLMImageRequester,
     LLMImageRequestPolicy,
 )
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.llm_profiles import (
     LLM_INPAINT_KEY,
     profile_by_id,
     profile_from_config,
 )
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.raster_assets import validate_raster_dimensions
-from ballontranslator.utils.text_effects import ImageGenerationRecipe
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.system.raster_assets import validate_raster_dimensions
+from ballontranslator.utils.text.text_effects import ImageGenerationRecipe
 from ..rendering.raster import EffectRasterAllocationError
 
 

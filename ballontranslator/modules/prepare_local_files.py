@@ -3,10 +3,10 @@ import os.path as osp
 import os
 
 from .base import LOGGER
-import ballontranslator.utils.shared as shared
-from ballontranslator.utils.download_util import DownloadCancelled, download_and_check_files
-from ballontranslator.utils.py_package_manager import MissingRequirement, PyPackageManager
-from ballontranslator.utils.registry import ModuleSpec
+import ballontranslator.utils.project.shared as shared
+from ballontranslator.utils.system.download_util import DownloadCancelled, download_and_check_files
+from ballontranslator.utils.env.py_package_manager import MissingRequirement, PyPackageManager
+from ballontranslator.utils.project.registry import ModuleSpec
 from .package_import_names import PACKAGE_IMPORT_NAMES
 
 

@@ -15,7 +15,7 @@ from qtpy.QtGui import (
     QTextFrame,
 )
 
-from ballontranslator.utils.fontformat import FontFormat, LineSpacingType, pt2px
+from ballontranslator.utils.fonts.fontformat import FontFormat, LineSpacingType, pt2px
 from .font_family import qfont_with_family
 from .annotations import letter_spacing_value, line_spacing_values
 

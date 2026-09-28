@@ -11,22 +11,22 @@ from qtpy.QtWidgets import QAction, QFileDialog, QMenu, QHBoxLayout, QVBoxLayout
 from qtpy.QtCore import Qt, QPoint, QSize, QEvent, Signal, QTimer, QRectF
 from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, QCloseEvent, QKeySequence, QPainter, QClipboard, QColor
 
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.text_processing import is_cjk
-from ballontranslator.utils.textblock import TextBlock, TextAlignment
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.text.text_processing import is_cjk
+from ballontranslator.utils.text.textblock import TextBlock, TextAlignment
+from ballontranslator.utils.text.text_effects import (
     SolidPaint,
     effect_paint_fallback_color,
     primary_stroke,
     with_non_stroke_effects,
     with_primary_stroke,
 )
-from ballontranslator.utils import shared
-from ballontranslator.utils.message import create_error_dialog, create_info_dialog
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.message import create_error_dialog, create_info_dialog
 from ballontranslator.modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
-from .misc import parse_stylesheet, set_html_family, QKEY, ndarray2pixmap
+from ballontranslator.ui.core.misc import parse_stylesheet, set_html_family, QKEY, ndarray2pixmap
 from .text_engine.item import TextBlkItem
-from ballontranslator.utils.config import (
+from ballontranslator.utils.project.config import (
     FontFormat,
     ProgramConfig,
     RunStatus,
@@ -36,8 +36,8 @@ from ballontranslator.utils.config import (
     save_text_styles,
     text_styles,
 )
-from ballontranslator.utils.proj_imgtrans import ProjImgTrans
-from .canvas import Canvas
+from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
+from ballontranslator.ui.canvas.canvas import Canvas
 from .configpanel import ConfigPanel
 from .module_manager import ModuleManager
 from .text_engine.editing.widgets import SourceTextEdit, TransTextEdit
@@ -48,18 +48,18 @@ from .text_engine.editing.manager import (
     SceneTextReplacementReason,
     TextPanel,
 )
-from .mainwindowbars import TitleBar, LeftBar, BottomBar
-from .menu_style import install_app_style_filters
-from .io_thread import ImgSaveThread, ImportDocThread, ExportDocThread
-from .update_thread import UpdateCheckThread
-from .font_change_detection import FontChangeDetector
-from .font_refresh import FontRefreshController
-from .update_dialog import UpdateReleaseDialog
-from .run_pipeline_dialog import RunPipelineDialog
-from .pipeline_error_dialog import PipelineErrorDialog
+from ballontranslator.ui.core.mainwindowbars import TitleBar, LeftBar, BottomBar
+from ballontranslator.ui.core.menu_style import install_app_style_filters
+from ballontranslator.ui.threads.io_thread import ImgSaveThread, ImportDocThread, ExportDocThread
+from ballontranslator.ui.threads.update_thread import UpdateCheckThread
+from ballontranslator.ui.core.font_change_detection import FontChangeDetector
+from ballontranslator.ui.core.font_refresh import FontRefreshController
+from ballontranslator.ui.dialogs.update_dialog import UpdateReleaseDialog
+from ballontranslator.ui.dialogs.run_pipeline_dialog import RunPipelineDialog
+from ballontranslator.ui.dialogs.pipeline_error_dialog import PipelineErrorDialog
 from .custom_widget import ScrollBar, Widget, ViewWidget
-from .global_search_widget import GlobalSearchWidget
-from .llm_context_editor import LLMContextEditor
+from ballontranslator.ui.widgets.global_search_widget import GlobalSearchWidget
+from ballontranslator.ui.widgets.llm_context_editor import LLMContextEditor
 from .text_engine.editing.commands import GlobalRepalceAllCommand
 from .text_engine.transforms.grid import start_grid_numba_warmup
 from .text_engine.effects.paint import (
@@ -70,10 +70,10 @@ from .text_engine.pipeline_formatting import (
     apply_auto_tate_chu_yoko,
 )
 from .framelesswindow import FramelessWindow, FramelessMoveResize
-from .drawing_commands import RunBlkTransCommand
-from .keywordsubwidget import KeywordSubWidget
-from .module_parse_widgets import ModuleParamDialog
-from . import shared_widget as SW
+from ballontranslator.ui.canvas.drawing_commands import RunBlkTransCommand
+from ballontranslator.ui.widgets.keywordsubwidget import KeywordSubWidget
+from ballontranslator.ui.widgets.module_parse_widgets import ModuleParamDialog
+from ballontranslator.ui.widgets import shared_widget as SW
 from .custom_widget import MessageBox, FrameLessMessageBox, ImgtransProgressMessageBox, ProgressMessageBox
 
 
@@ -811,7 +811,7 @@ class MainWindow(mainwindow_cls):
         为目录中的TIF文件生成预览图，并确保只加载预览图
         """
         try:
-            from ballontranslator.utils.io_utils import create_thumbnail, find_tif_files
+            from ballontranslator.utils.system.io_utils import create_thumbnail, find_tif_files
             # 查找目录中的所有TIF文件
             tif_files = find_tif_files(directory)
             
@@ -1126,10 +1126,10 @@ class MainWindow(mainwindow_cls):
     def on_open_merge_tool(self):
         """打开区域合并工具对话框"""
         if not hasattr(self, 'merge_dialog') or self.merge_dialog is None:
-            from .merge_dialog import MergeDialog
+            from ballontranslator.ui.dialogs.merge_dialog import MergeDialog
             from qtpy.QtCore import QThread
             from qtpy.QtWidgets import QProgressDialog
-            from ballontranslator.utils import merger
+            from ballontranslator.utils.project import merger
             
             self.merge_dialog = MergeDialog(self)
             self.merge_dialog.run_current_clicked.connect(lambda: self.run_merge_task(on_current=True))
@@ -1144,7 +1144,7 @@ class MainWindow(mainwindow_cls):
     def on_open_photoshop_bridge(self):
         """Open Photoshop Bridge & Tools dialog"""
         if not hasattr(self, 'ps_bridge_dialog') or self.ps_bridge_dialog is None:
-            from .ps_bridge_dialog import PhotoshopBridgeDialog
+            from ballontranslator.ui.dialogs.ps_bridge_dialog import PhotoshopBridgeDialog
             self.ps_bridge_dialog = PhotoshopBridgeDialog(self, project=self.imgtrans_proj)
         
         self.ps_bridge_dialog.refresh_status()
@@ -1156,7 +1156,7 @@ class MainWindow(mainwindow_cls):
 
     def prepare_photoshop_bridge_context(self) -> dict:
         """Save current app state before Photoshop reads the project snapshot."""
-        from .ps_bridge_dialog import project_state_matches_disk
+        from ballontranslator.ui.dialogs.ps_bridge_dialog import project_state_matches_disk
 
         project = self.imgtrans_proj
         if not project.proj_path:
@@ -1179,7 +1179,7 @@ class MainWindow(mainwindow_cls):
 
     def apply_photoshop_bridge_updates(self, payload: dict) -> int:
         """Validate and persist Photoshop changes through project ownership."""
-        from .ps_bridge_dialog import (
+        from ballontranslator.ui.dialogs.ps_bridge_dialog import (
             project_state_matches_disk,
             validate_photoshop_bridge_updates,
         )
@@ -1270,7 +1270,7 @@ class MainWindow(mainwindow_cls):
 
     def run_merge_task(self, on_current=False):
         """执行区域合并任务"""
-        from ballontranslator.utils import merger
+        from ballontranslator.utils.project import merger
         from qtpy.QtWidgets import QMessageBox
         
         if self.imgtrans_proj.is_empty:
@@ -1281,7 +1281,7 @@ class MainWindow(mainwindow_cls):
         
         if on_current:
             # 对当前文件运行 - 直接在内存中操作，不读写文件
-            from ballontranslator.utils.textblock import TextBlock
+            from ballontranslator.utils.text.textblock import TextBlock
             
             current_img = self.imgtrans_proj.current_img
             if not current_img:
@@ -1359,7 +1359,7 @@ class MainWindow(mainwindow_cls):
     
     def run_merge_all_async(self, json_path, img_list, config):
         """异步执行所有文件的合并"""
-        from .io_thread import MergeThread
+        from ballontranslator.ui.threads.io_thread import MergeThread
         
         # 创建合并线程（如果不存在）
         if not hasattr(self, 'merge_thread'):

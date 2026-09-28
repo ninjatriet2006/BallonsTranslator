@@ -13,8 +13,8 @@ from qtpy.QtWidgets import (
 )
 
 from ballontranslator.ui.custom_widget import SmallComboBox, Widget
-from ballontranslator.ui.icon_rendering import render_svg_pixmap
-from ballontranslator.ui.llm_modality import (
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.llm_modality import (
     LLM_MODALITY_IMAGE,
     LLM_MODALITY_IMAGE_COLOR,
     LLM_MODALITY_TEXT,
@@ -22,10 +22,10 @@ from ballontranslator.ui.llm_modality import (
     LLM_MODALITY_VISION,
     LLM_MODALITY_VISION_COLOR,
 )
-from ballontranslator.ui.misc import themed_icon_path
-from ballontranslator.utils import shared
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.llm_profiles import (
+from ballontranslator.ui.core.misc import themed_icon_path
+from ballontranslator.utils.project import shared
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.llm_profiles import (
     LLM_INPAINT_KEY,
     LLM_OCR_KEY,
     LLM_TRANSLATOR_KEY,

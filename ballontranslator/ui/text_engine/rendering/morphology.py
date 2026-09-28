@@ -5,7 +5,7 @@ import math
 import cv2
 import numpy as np
 
-from ballontranslator.utils.rgba import (
+from ballontranslator.utils.project.rgba import (
     premultiply_rgba_in_place,
     unpremultiply_rgba_in_place,
 )

@@ -10,10 +10,10 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import QSize, Signal, Qt
 from qtpy.QtGui import QDoubleValidator, QPaintEvent, QPainter, QPalette
 
-from ballontranslator.utils.shared import CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
+from ballontranslator.utils.project.shared import CONFIG_COMBOBOX_LONG, CONFIG_COMBOBOX_MIDEAN, CONFIG_COMBOBOX_SHORT, CONFIG_COMBOBOX_HEIGHT
 from .push_button import NoBorderPushBtn
-from ..icon_rendering import render_svg_pixmap
-from ..misc import themed_icon_path
+from ballontranslator.ui.core.icon_rendering import render_svg_pixmap
+from ballontranslator.ui.core.misc import themed_icon_path
 
 
 class ComboBox(QComboBox):

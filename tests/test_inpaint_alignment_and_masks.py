@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from ballontranslator.modules.inpaint.base import filter_mask_by_bboxes
 from ballontranslator.modules.textdetector import TextBlock
-from ballontranslator.modules.textdetector.detector_llm import (
+from ballontranslator.modules.textdetector.llm.detector_llm import (
     is_flat_background,
     extract_stroke_mask,
     LLMDetector,
@@ -15,8 +15,8 @@ from ballontranslator.modules.llm_image import (
     letterbox_image,
     unletterbox_image,
 )
-from ballontranslator.utils.config import pcfg
-from ballontranslator.utils.llm_profiles import LLMProfile
+from ballontranslator.utils.project.config import pcfg
+from ballontranslator.utils.project.llm_profiles import LLMProfile
 
 
 class InpaintAlignmentAndMaskTests(unittest.TestCase):

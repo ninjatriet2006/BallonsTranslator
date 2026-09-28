@@ -9,19 +9,19 @@ import numpy as np
 from qtpy.QtCore import QRectF
 from qtpy.QtGui import QImage, QPainter, QPalette
 
-from ballontranslator.utils.text_effects import (
+from ballontranslator.utils.text.text_effects import (
     GeneratedEffectPaint,
     LinearGradientPaint,
     SolidPaint,
     TexturePaint,
 )
-from ballontranslator.utils.logger import logger as LOGGER
-from ballontranslator.utils.rgba import (
+from ballontranslator.utils.system.logger import logger as LOGGER
+from ballontranslator.utils.project.rgba import (
     premultiply_rgba_in_place,
     unpremultiply_rgba_in_place,
 )
 
-from ...misc import ndarray2pixmap
+from ballontranslator.ui.core.misc import ndarray2pixmap
 
 
 _numba_colorize_linear_gradient_rgba = None

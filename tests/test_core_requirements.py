@@ -3,9 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from ballontranslator.utils import core_requirements
-from ballontranslator.utils.py_package_manager import MissingRequirement
-from ballontranslator.utils.package_installer import InstallResult
+from ballontranslator.utils.env import core_requirements
+from ballontranslator.utils.env.py_package_manager import MissingRequirement
+from ballontranslator.utils.env.package_installer import InstallResult
 
 
 class FakeStream:
@@ -36,8 +36,8 @@ class FakeProcess:
 class CoreRequirementsTests(unittest.TestCase):
 
     def test_healthy_core_imports_do_not_install(self):
-        with mock.patch('ballontranslator.utils.core_requirements.check_core_imports', return_value=[]), \
-                mock.patch('ballontranslator.utils.core_requirements.install_core_requirements') as install:
+        with mock.patch('ballontranslator.utils.env.core_requirements.check_core_imports', return_value=[]), \
+                mock.patch('ballontranslator.utils.env.core_requirements.install_core_requirements') as install:
             did_install = core_requirements.ensure_core_requirements(repo_root='/tmp/repo')
 
         self.assertFalse(did_install)
@@ -45,12 +45,12 @@ class CoreRequirementsTests(unittest.TestCase):
 
     def test_missing_core_import_installs_once(self):
         with mock.patch(
-            'ballontranslator.utils.core_requirements.check_core_imports',
+            'ballontranslator.utils.env.core_requirements.check_core_imports',
             return_value=['numpy: missing'],
         ), mock.patch(
-            'ballontranslator.utils.core_requirements.install_core_requirements',
+            'ballontranslator.utils.env.core_requirements.install_core_requirements',
             return_value=InstallResult(True, ['python', '-m', 'pip']),
-        ) as install, mock.patch('ballontranslator.utils.core_requirements._drop_probe_modules') as drop:
+        ) as install, mock.patch('ballontranslator.utils.env.core_requirements._drop_probe_modules') as drop:
             did_install = core_requirements.ensure_core_requirements(repo_root='/tmp/repo')
 
         self.assertTrue(did_install)
@@ -64,17 +64,17 @@ class CoreRequirementsTests(unittest.TestCase):
                 f.write('spacy-pkuseg\n')
 
             with mock.patch(
-                'ballontranslator.utils.core_requirements.check_core_imports',
+                'ballontranslator.utils.env.core_requirements.check_core_imports',
                 return_value=[],
             ), mock.patch(
-                'ballontranslator.utils.py_package_manager.PyPackageManager.missing_requirements',
+                'ballontranslator.utils.env.py_package_manager.PyPackageManager.missing_requirements',
                 return_value=[
                     MissingRequirement('spacy-pkuseg', 'spacy-pkuseg', ['spacy_pkuseg']),
                 ],
             ), mock.patch(
-                'ballontranslator.utils.core_requirements.install_core_requirements',
+                'ballontranslator.utils.env.core_requirements.install_core_requirements',
                 return_value=InstallResult(True, ['python', '-m', 'pip']),
-            ) as install, mock.patch('ballontranslator.utils.core_requirements._drop_probe_modules') as drop:
+            ) as install, mock.patch('ballontranslator.utils.env.core_requirements._drop_probe_modules') as drop:
                 did_install = core_requirements.ensure_core_requirements(
                     repo_root=tmpdir,
                     requirements_file=requirements_path,
@@ -86,14 +86,14 @@ class CoreRequirementsTests(unittest.TestCase):
 
     def test_requirement_file_failure_installs_before_import_probes(self):
         with mock.patch(
-            'ballontranslator.utils.core_requirements.check_core_requirements_file',
+            'ballontranslator.utils.env.core_requirements.check_core_requirements_file',
             return_value=['numpy>=2: missing package or import (numpy)'],
         ), mock.patch(
-            'ballontranslator.utils.core_requirements.check_core_imports',
+            'ballontranslator.utils.env.core_requirements.check_core_imports',
         ) as check_imports, mock.patch(
-            'ballontranslator.utils.core_requirements.install_core_requirements',
+            'ballontranslator.utils.env.core_requirements.install_core_requirements',
             return_value=InstallResult(True, ['python', '-m', 'pip']),
-        ) as install, mock.patch('ballontranslator.utils.core_requirements._drop_probe_modules'):
+        ) as install, mock.patch('ballontranslator.utils.env.core_requirements._drop_probe_modules'):
             did_install = core_requirements.ensure_core_requirements(repo_root='/tmp/repo')
 
         self.assertTrue(did_install)
@@ -106,17 +106,17 @@ class CoreRequirementsTests(unittest.TestCase):
                 return SimpleNamespace()
             return SimpleNamespace(IMREAD_COLOR=1, IMREAD_GRAYSCALE=0, cvtColor=lambda: None)
 
-        with mock.patch('ballontranslator.utils.core_requirements.importlib.import_module', side_effect=import_module):
+        with mock.patch('ballontranslator.utils.env.core_requirements.importlib.import_module', side_effect=import_module):
             failures = core_requirements.check_core_imports([('cv2', ('IMREAD_COLOR',))])
 
         self.assertEqual(failures, ['cv2: missing IMREAD_COLOR'])
 
     def test_failed_core_install_raises_clear_error(self):
         with mock.patch(
-            'ballontranslator.utils.core_requirements.check_core_imports',
+            'ballontranslator.utils.env.core_requirements.check_core_imports',
             return_value=['cv2: missing IMREAD_COLOR'],
         ), mock.patch(
-            'ballontranslator.utils.core_requirements.install_core_requirements',
+            'ballontranslator.utils.env.core_requirements.install_core_requirements',
             return_value=InstallResult(False, ['python', '-m', 'pip'], returncode=1, stderr='boom'),
         ):
             with self.assertRaisesRegex(RuntimeError, 'Failed to install core Python requirements'):
@@ -125,13 +125,13 @@ class CoreRequirementsTests(unittest.TestCase):
     def test_index_url_reaches_core_installer(self):
         env = {'INDEX_URL': 'https://example.invalid/simple'}
         with mock.patch(
-            'ballontranslator.utils.core_requirements.check_core_imports',
+            'ballontranslator.utils.env.core_requirements.check_core_imports',
             return_value=['qtpy: missing'],
         ), mock.patch(
-            'ballontranslator.utils.package_installer.subprocess.Popen',
+            'ballontranslator.utils.env.package_installer.subprocess.Popen',
         ) as popen, mock.patch(
-            'ballontranslator.utils.package_installer.LOGGER.info',
-        ) as log_info, mock.patch('ballontranslator.utils.core_requirements._drop_probe_modules'):
+            'ballontranslator.utils.env.package_installer.LOGGER.info',
+        ) as log_info, mock.patch('ballontranslator.utils.env.core_requirements._drop_probe_modules'):
             popen.return_value = FakeProcess()
             core_requirements.ensure_core_requirements(repo_root='/tmp/repo', env=env)
 

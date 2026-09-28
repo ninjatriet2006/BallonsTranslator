@@ -14,7 +14,7 @@ from .font_registry import (
     parse_font_name_data,
 )
 
-from ballontranslator.utils.logger import logger as LOGGER
+from ballontranslator.utils.system.logger import logger as LOGGER
 FONT_EXTENSIONS = {'.ttf', '.otf', '.ttc', '.pfb'}
 
 

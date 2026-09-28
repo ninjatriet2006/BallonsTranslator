@@ -1,7 +1,7 @@
 import logging
 import unittest
 
-from ballontranslator.utils.logger import (
+from ballontranslator.utils.system.logger import (
     ColoredFormatter,
     ColoredLogger,
     FORMAT,
