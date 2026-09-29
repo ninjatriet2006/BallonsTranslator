@@ -54,6 +54,10 @@ from ballontranslator.utils.project.llm_profiles import (
     LLM_OCR_KEY,
     LLM_TRANSLATOR_KEY,
     LLMProfile,
+    PROTOCOL_OPTIONS,
+    PROTOCOL_DISPLAY_NAMES,
+    PROVIDER_DEFAULTS,
+    default_profile,
     copy_profile,
     fetch_remote_models,
     profile_by_id,
@@ -86,6 +90,7 @@ class ModelFetchThread(QThread):
 
 PROFILE_COMMON_PARAM_DEFS = [
     ('require_api_key', 'checkbox'),
+    ('protocol', 'selector'),
     ('base_url', 'line_editor'),
     ('concurrency', 'line_editor'),
     ('request_delay', 'line_editor'),
@@ -424,6 +429,7 @@ class ProfileCardWidget(QGroupBox):
         self._action_buttons_visible = False
         self._fetch_threads = {}
         self.profile_param_display_names = {
+            'protocol': self.tr('Protocol / API Format'),
             'base_url': self.tr('Base URL'),
             'image_base_url': self.tr('Image Base URL'),
             'require_api_key': self.tr('Require API Key'),
@@ -448,7 +454,8 @@ class ProfileCardWidget(QGroupBox):
             'low_vram_mode': self.tr('Low VRAM Mode'),
         }
         self.profile_param_descriptions = {
-            'base_url': self.tr('OpenAI-compatible API base URL.'),
+            'protocol': self.tr('API communication protocol (OpenAI Chat Completions, Responses API, Anthropic Messages).'),
+            'base_url': self.tr('API base URL for LLM requests.'),
             'image_base_url': self.tr('OpenAI-compatible image API base URL used only by LLMInpaint.'),
             'require_api_key': self.tr('Require API key before running this LLM task.'),
             'vision_model': self.tr('Model used by LLMOCR for image OCR.'),
@@ -794,6 +801,13 @@ class ProfileCardWidget(QGroupBox):
         thinking_combo = self.details.param_widgets.get('thinking_level')
         if isinstance(thinking_combo, ParamComboBox):
             self._syncComboBox(thinking_combo, self.profile.thinking_level_options, self.profile.thinking_level)
+        protocol_combo = self.details.param_widgets.get('protocol')
+        if isinstance(protocol_combo, ParamComboBox):
+            self._syncComboBox(
+                protocol_combo,
+                getattr(self.profile, 'protocol_options', None) or list(PROTOCOL_OPTIONS),
+                getattr(self.profile, 'protocol', 'openai_completion'),
+            )
         for key in ('prompt', 'vision_prompt', 'detector_box_prompt', 'detector_ocr_prompt', 'image_prompt'):
             editor = self.details.param_widgets.get(key)
             if isinstance(editor, QPlainTextEdit):
@@ -838,6 +852,8 @@ class ProfileCardWidget(QGroupBox):
                 options = self.profile.thinking_level_options
             elif key == 'vision_detail_level':
                 options = self.profile.vision_detail_level_options
+            elif key == 'protocol':
+                options = getattr(self.profile, 'protocol_options', None) or list(PROTOCOL_OPTIONS)
             else:
                 options = None
             if widget_type == 'selector':
@@ -1789,8 +1805,12 @@ class LLMProfilesWidget(QWidget):
         self.new_btn.setFixedHeight(24)
         new_menu = QMenu(self.new_btn)
         new_empty_action = new_menu.addAction(self.tr('New Empty Profile'))
+        new_empty_action.triggered.connect(lambda: self.newProfile())
+        preset_menu = new_menu.addMenu(self.tr('New from Preset...'))
+        for preset_name in sorted(PROVIDER_DEFAULTS.keys()):
+            action = preset_menu.addAction(preset_name)
+            action.triggered.connect(lambda checked=False, p=preset_name: self.newProfile(p))
         import_action = new_menu.addAction(self.tr('Import from Clipboard'))
-        new_empty_action.triggered.connect(self.newProfile)
         import_action.triggered.connect(self.importProfiles)
         self.new_btn.setMenu(new_menu)
         self.restore_btn = NoBorderPushBtn(self.tr('Restore Built-ins...'), self)
@@ -1919,12 +1939,18 @@ class LLMProfilesWidget(QWidget):
             if profile_id not in used_ids:
                 return profile_id
 
-    def newProfile(self):
+    def newProfile(self, provider_preset: Optional[str] = None):
         self.filter_edit.clear()
-        profile = LLMProfile()
-        profile.id = self._new_custom_profile_id()
-        profile.name = self.tr('New Profile')
-        profile.built_in = False
+        if provider_preset and provider_preset in PROVIDER_DEFAULTS:
+            profile = default_profile(provider_preset)
+            profile.id = self._new_custom_profile_id()
+            profile.built_in = False
+            profile.name = f"{provider_preset} (New)"
+        else:
+            profile = LLMProfile()
+            profile.id = self._new_custom_profile_id()
+            profile.name = self.tr('New Profile')
+            profile.built_in = False
         pcfg.module.llm_profiles.append(profile)
         row = self.addProfileRow(profile)
         self.applyFilterToRow(row)

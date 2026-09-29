@@ -39,98 +39,35 @@ THINKING_LEVEL_OPTIONS = [
     "xhigh",
 ]
 VISION_DETAIL_LEVEL_OPTIONS = ["None", "auto", "low", "high"]
+
+PROTOCOL_OPENAI_COMPLETION = "openai_completion"
+PROTOCOL_OPENAI_RESPONSE = "openai_response"
+PROTOCOL_ANTHROPIC_MESSAGES = "anthropic_messages"
+
+PROTOCOL_OPTIONS = [
+    PROTOCOL_OPENAI_COMPLETION,
+    PROTOCOL_OPENAI_RESPONSE,
+    PROTOCOL_ANTHROPIC_MESSAGES,
+]
+
+PROTOCOL_DISPLAY_NAMES = {
+    PROTOCOL_OPENAI_COMPLETION: "OpenAI Chat Completions",
+    PROTOCOL_OPENAI_RESPONSE: "OpenAI Responses API",
+    PROTOCOL_ANTHROPIC_MESSAGES: "Anthropic Messages API",
+}
+
 PROVIDER_ALIASES = {
     "Google": "Gemini",
+    "Vyceai": "Agnes AI",
+    "Agnes": "Agnes AI",
+    "agnes-ai": "Agnes AI",
+    "Claude": "Anthropic",
 }
-PROVIDER_DEFAULTS = {
-    "OpenAI": {
-        "id": "openai",
-        "base_url": "https://api.openai.com/v1",
-        "require_api_key": True,
-        "model": "gpt-5.5",
-        "support_vision": True,
-        "vision_model": "gpt-5.5",
-        "vision_detail_level": "auto",
-        "model_options": [
-            "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-            "gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
-            "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini",
-        ],
-        "vision_model_options": [
-            "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-            "gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
-            "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini",
-        ],
-        "support_image": True,
-        "image_base_url": "https://api.openai.com/v1/images/edits",
-        "image_model_options": ["gpt-image-2"]
-    },
-    "DeepSeek": {
-        "id": "deepseek",
-        "base_url": "https://api.deepseek.com",
-        "require_api_key": True,
-        "model": "deepseek-v4-flash",
-        "model_options": ["deepseek-v4-flash", "deepseek-v4-pro"],
-    },
-    "Gemini": {
-        "id": "google",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "require_api_key": True,
-        "model": "gemini-3.1-flash-lite",
-        "thinking_level": "medium",
-        "support_vision": True,
-        "vision_model": "gemini-3.1-flash-lite",
-        "vision_detail_level": "auto",
-        "model_options": ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-pro-latest", "gemma-4-31b-it", "gemma-4-26b-a4b-it"],
-        "vision_model_options": ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-pro-latest"],
-        "support_image": True,
-        "image_model_options": ["gemini-3.1-flash-lite-image"],
-        "image_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "json_schema_response_format": True,
-    },
-    "OpenRouter": {
-        "id": "openrouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "require_api_key": True,
-        "model": "openai/gpt-5.5",
-        "support_vision": True,
-        "vision_model": "openai/gpt-5.5",
-        "vision_detail_level": "auto",
-        "model_options": ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-4o",
-        "anthropic/claude-sonnet-4", "~anthropic/claude-sonnet-latest", "~x-ai/grok-latest",
-        "~google/gemini-flash-latest", "~google/gemini-pro-latest",
-        "qwen/qwen3.7-plus", "qwen/qwen3.7-max", "qwen/qwen3.6-plus"
-        ],
-        "vision_model_options": ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-4o",
-        "anthropic/claude-sonnet-4", "~anthropic/claude-sonnet-latest", "~x-ai/grok-latest",
-        "~google/gemini-flash-latest", "~google/gemini-pro-latest",
-        "qwen/qwen3.7-plus", "qwen/qwen3.7-max", "qwen/qwen3.6-plus"
-        ],
-        "support_image": True,
-        "image_base_url": "https://openrouter.ai/api/v1/images",
-        "image_model": "black-forest-labs/flux.2-klein-4b",
-        "image_model_options": ["black-forest-labs/flux.2-klein-4b"]
-    },
-    "LM Studio": {
-        "id": "lmstudio",
-        "base_url": "http://localhost:1234/v1",
-        "require_api_key": False,
-        "json_schema_response_format": True,
-        "model": "local-model",
-        "model_options": ["local-model"],
-    },
-    "Ollama": {
-        "id": "ollama",
-        "base_url": "http://localhost:11434/v1/",
-        "require_api_key": False,
-        "model": "llama3.1",
-        "support_vision": True,
-        "vision_model": "llama3.1",
-        "vision_detail_level": "auto",
-        "model_options": ["llama3.1", "qwen2.5", "mistral"],
-        "vision_model_options": ["llama3.1", "qwen2.5", "mistral"],
-    },
-}
+
+from ballontranslator.utils.project.llm_providers import (
+    PROVIDER_DEFAULTS,
+    get_registered_providers,
+)
 
 DEFAULT_TRANSLATION_PROMPT = (
     "Translate faithfully and fluently into authentic, natural comic dialogue suited for speech bubbles. "
@@ -214,6 +151,8 @@ class LLMProfile(Config):
     image_base_url: str = ""
     image_model: str = ""
     image_model_options: List[str] = field(default_factory=list)
+    protocol: str = PROTOCOL_OPENAI_COMPLETION
+    protocol_options: List[str] = field(default_factory=lambda: list(PROTOCOL_OPTIONS))
     thinking_level: str = THINKING_AUTO
     thinking_level_options: List[str] = field(default_factory=lambda: list(THINKING_LEVEL_OPTIONS))
     prompt: str = DEFAULT_TRANSLATION_PROMPT
@@ -316,6 +255,19 @@ def _normalize_profile_thinking(profile: LLMProfile) -> LLMProfile:
         profile.rpm_limit = max(0, int(getattr(profile, 'rpm_limit', 0) or 0))
     except Exception:
         profile.rpm_limit = 0
+
+    raw_protocol = getattr(profile, 'protocol', None)
+    if not isinstance(raw_protocol, str) or raw_protocol not in PROTOCOL_OPTIONS:
+        profile.protocol = PROTOCOL_OPENAI_COMPLETION
+    raw_proto_options = getattr(profile, 'protocol_options', None)
+    if not isinstance(raw_proto_options, list) or not raw_proto_options:
+        profile.protocol_options = list(PROTOCOL_OPTIONS)
+    else:
+        norm_proto_options = [opt for opt in PROTOCOL_OPTIONS if opt in raw_proto_options]
+        for opt in PROTOCOL_OPTIONS:
+            if opt not in norm_proto_options:
+                norm_proto_options.append(opt)
+        profile.protocol_options = norm_proto_options
     return profile
 
 
@@ -509,8 +461,10 @@ def _merge_builtin_profile_options(profile: LLMProfile) -> LLMProfile:
     profile.image_model_options = _merge_profile_options(
         defaults.get('image_model_options'), profile.image_model_options, profile.image_model,
     )
-    if provider == 'OpenAI' and not profile.image_base_url:
+    if 'image_base_url' in defaults and not profile.image_base_url:
         profile.image_base_url = defaults['image_base_url']
+    if 'protocol' in defaults and (not getattr(profile, 'protocol', None) or profile.protocol == PROTOCOL_OPENAI_COMPLETION):
+        profile.protocol = defaults['protocol']
     return profile
 
 

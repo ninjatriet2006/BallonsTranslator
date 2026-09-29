@@ -249,16 +249,21 @@ class LLMImageRequester:
         if not base_url:
             raw_base = str(profile.base_url or '').strip()
             if raw_base:
-                if cls._is_gemini_url(raw_base):
-                    base_url = raw_base
-                elif cls._is_openrouter_url(raw_base):
-                    base_url = cls._join_url(raw_base.rstrip('/'), '/images')
-                elif cls._is_agnes_url(raw_base) or str(profile.image_model or '').startswith('agnes-image'):
-                    base_url = cls._agnes_endpoint(raw_base)
-                elif raw_base.rstrip('/').endswith(('images', 'images/edits', 'images/generations')):
-                    base_url = raw_base
-                else:
-                    base_url = raw_base.rstrip('/') + '/images/edits'
+                try:
+                    from ballontranslator.modules.inpaint.llm.backends import get_image_backend
+                    backend = get_image_backend(profile, base_url=raw_base)
+                    base_url = backend.get_endpoint(raw_base)
+                except Exception:
+                    if cls._is_gemini_url(raw_base):
+                        base_url = raw_base
+                    elif cls._is_openrouter_url(raw_base):
+                        base_url = cls._join_url(raw_base.rstrip('/'), '/images')
+                    elif cls._is_agnes_url(raw_base) or str(profile.image_model or '').startswith('agnes-image'):
+                        base_url = cls._agnes_endpoint(raw_base)
+                    elif raw_base.rstrip('/').endswith(('images', 'images/edits', 'images/generations')):
+                        base_url = raw_base
+                    else:
+                        base_url = raw_base.rstrip('/') + '/images/edits'
         if not base_url:
             raise LLMBaseURLRequiredError(
                 profile.id, profile.name, target='image_base_url'
@@ -408,7 +413,7 @@ class LLMImageRequester:
     @staticmethod
     def _is_agnes_url(base_url: str) -> bool:
         host = urlparse(base_url).netloc.lower()
-        return host == 'agnes-ai.com' or host.endswith('.agnes-ai.com')
+        return host in {'agnes-ai.com', 'vyceai.com'} or host.endswith('.agnes-ai.com') or host.endswith('.vyceai.com')
 
     @classmethod
     def _agnes_endpoint(cls, base_url: str) -> str:
@@ -776,22 +781,29 @@ class LLMImageRequester:
                 # before the synchronous provider call begins.
                 raise LLMRequestStopped()
             base_url = self._image_base_url(profile)
-            if self._is_gemini_url(base_url):
-                result = self._request_gemini_image(
-                    client, profile, image_file, prompt=prompt, model=model
+            try:
+                from ballontranslator.modules.inpaint.llm.backends import get_image_backend
+                backend = get_image_backend(profile, model=model, base_url=base_url)
+                result = backend.request_image(
+                    self, client, profile, image_file, prompt=prompt, model=model
                 )
-            elif self._is_openrouter_url(base_url):
-                result = self._request_openrouter_image(
-                    client, profile, image_file, prompt=prompt, model=model
-                )
-            elif self._is_agnes_url(base_url) or str(model or profile.image_model or '').startswith('agnes-image'):
-                result = self._request_agnes_image(
-                    client, profile, image_file, prompt=prompt, model=model
-                )
-            else:
-                result = self._request_openai_compatible_image(
-                    client, profile, image_file, prompt=prompt, model=model
-                )
+            except Exception:
+                if self._is_gemini_url(base_url):
+                    result = self._request_gemini_image(
+                        client, profile, image_file, prompt=prompt, model=model
+                    )
+                elif self._is_openrouter_url(base_url):
+                    result = self._request_openrouter_image(
+                        client, profile, image_file, prompt=prompt, model=model
+                    )
+                elif self._is_agnes_url(base_url) or str(model or profile.image_model or '').startswith('agnes-image'):
+                    result = self._request_agnes_image(
+                        client, profile, image_file, prompt=prompt, model=model
+                    )
+                else:
+                    result = self._request_openai_compatible_image(
+                        client, profile, image_file, prompt=prompt, model=model
+                    )
             if (
                 resize_to_input
                 and original_shape is not None

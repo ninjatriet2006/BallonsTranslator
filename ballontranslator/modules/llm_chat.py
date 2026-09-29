@@ -256,8 +256,10 @@ class LLMChatRequester:
             profile_rpm = getattr(profile, 'rpm_limit', 0) if profile else 0
             if profile_rpm > 0:
                 rpm = profile_rpm
-            else:
+            elif hasattr(self, 'get_param_value'):
                 rpm = self.get_param_value('max requests per minute')
+            else:
+                rpm = 0
 
             profile_delay = getattr(profile, 'request_delay', 0.0) if profile else 0.0
             global_delay = getattr(pcfg.module, 'llm_request_delay', 0.0)
@@ -265,8 +267,10 @@ class LLMChatRequester:
                 delay = profile_delay
             elif global_delay > 0:
                 delay = global_delay
-            else:
+            elif hasattr(self, 'get_param_value'):
                 delay = self.get_param_value('delay')
+            else:
+                delay = 0.0
 
             if rpm > 0:
                 if current_time - self.minute_start_time >= 60:
@@ -298,6 +302,34 @@ class LLMChatRequester:
         """Perform one request; feature owners decide whether to retry it."""
         if self.stop_event is not None and self.stop_event.is_set():
             raise LLMRequestStopped()
+        if getattr(profile, 'protocol', 'openai_completion') == 'anthropic_messages':
+            from ballontranslator.modules.llm.protocols.anthropic_messages import AnthropicMessagesProtocol
+            protocol_handler = AnthropicMessagesProtocol(profile, stop_event=self.stop_event)
+            self._respect_delay(profile)
+            proxy = str(self.get_param_value('proxy') or '') if hasattr(self, 'get_param_value') else ''
+            configured_timeout = None
+            if hasattr(self, 'get_param_value'):
+                try:
+                    val = self.get_param_value('request timeout')
+                    if val is not None:
+                        configured_timeout = float(val)
+                except Exception:
+                    pass
+            timeout = configured_timeout if (configured_timeout and configured_timeout > 0) else 180.0
+
+            res = protocol_handler.send_chat_completion(
+                messages=api_args.get('messages', []),
+                max_tokens=api_args.get('max_tokens') or api_args.get('max_completion_tokens'),
+                model=api_args.get('model'),
+                proxy=proxy,
+                timeout=timeout,
+            )
+            return LLMChatResult(
+                content=res.content,
+                usage=res.token_usage,
+                finish_reason=res.finish_reason or 'stop',
+            )
+
         openai = self._openai_module()
         client = self._initialize_client(profile)
         call_args = dict(api_args)
