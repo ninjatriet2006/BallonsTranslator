@@ -29,6 +29,7 @@ class RunStatus:
     FIN_OCR = 2
     FIN_INPAINT = 4
     FIN_TRANSLATE = 8
+    FIN_UPSCALE = 16
     FIN_ALL = 15
 
 
@@ -102,6 +103,13 @@ class ModuleConfig(Config):
     textdetector_params: Dict = field(default_factory=lambda: dict())
     ocr_params: Dict = field(default_factory=lambda: dict())
     translator_params: Dict = field(default_factory=lambda: dict())
+    upscaler_params: Dict = field(default_factory=lambda: dict())
+    upscaler: str = 'None'
+    upscale_denoise: bool = True
+    enable_upscale: bool = False
+    standardize_dimensions: bool = False
+    standardize_target_width: int = 0
+    standardize_target_height: int = 0
     llm_profiles: List[LLMProfile] = field(default_factory=lambda: list())
     translator_llm_id: str = ''
     ocr_llm_id: str = ''
@@ -167,6 +175,7 @@ class ModuleConfig(Config):
         params.inpainter_params = self.get_params('inpainter', for_saving=True)
         params.textdetector_params = self.get_params('textdetector', for_saving=True)
         params.translator_params = self.get_params('translator', for_saving=True)
+        params.upscaler_params = self.get_params('upscaler', for_saving=True)
         params.llm_profiles = self.get_saving_llm_profiles()
         if to_dict:
             return params.__dict__
@@ -194,6 +203,8 @@ class ModuleConfig(Config):
             return self.enable_translate
         elif idx == 3:
             return self.enable_inpaint
+        elif idx == 4:
+            return self.enable_upscale
         else:
             raise Exception(f'not supported stage idx: {idx}')
 
@@ -203,6 +214,7 @@ class ModuleConfig(Config):
             'enable_ocr',
             'enable_translate',
             'enable_inpaint',
+            'enable_upscale',
         )
         if idx < 0 or idx >= len(stage_attrs):
             raise Exception(f'not supported stage idx: {idx}')
@@ -211,7 +223,7 @@ class ModuleConfig(Config):
         self.update_finish_code()
         
     def all_stages_disabled(self):
-        return (self.enable_detect or self.enable_ocr or self.enable_translate or self.enable_inpaint) is False
+        return (self.enable_detect or self.enable_ocr or self.enable_translate or self.enable_inpaint or self.enable_upscale) is False
 
     def __post_init__(self):
         for setting_name, default in (
@@ -300,7 +312,8 @@ class ModuleConfig(Config):
         self.finish_code = self.enable_detect * RunStatus.FIN_DET + \
             self.enable_ocr * RunStatus.FIN_OCR + \
                 self.enable_translate * RunStatus.FIN_TRANSLATE + \
-                    self.enable_inpaint * RunStatus.FIN_INPAINT
+                    self.enable_inpaint * RunStatus.FIN_INPAINT + \
+                        self.enable_upscale * getattr(RunStatus, 'FIN_UPSCALE', 16)
         
 
 @nested_dataclass

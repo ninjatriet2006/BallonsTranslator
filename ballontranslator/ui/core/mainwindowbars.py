@@ -610,6 +610,12 @@ class BottomBar(Widget):
             'bottombar_translate_activate.svg',
             LLM_MODALITY_TEXT,
         )
+        self.upscale_selector = ModuleSelectionWidget(
+            self.tr('Upscaler'),
+            'image.svg',
+            icon_color='#8e44ad',
+            is_upscaler=True,
+        )
 
         self.hlayout = QHBoxLayout(self)
         self.paintChecker = QCheckBox()
@@ -637,6 +643,7 @@ class BottomBar(Widget):
         self.hlayout.addWidget(self.ocr_selector)
         self.hlayout.addWidget(self.inpaint_selector)
         self.hlayout.addWidget(self.trans_selector)
+        self.hlayout.addWidget(self.upscale_selector)
 
         self.error_badge = QPushButton(self)
         self.error_badge.setObjectName('BottomBarErrorBadge')

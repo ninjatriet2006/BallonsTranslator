@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
     QStyle,
     QStyleOptionButton,
@@ -57,13 +58,14 @@ from ballontranslator.utils.project.config import (
     save_config,
     TranslateContext,
 )
-from ballontranslator.utils.project.llm_profiles import LLM_OCR_KEY, LLM_TRANSLATOR_KEY
+from ballontranslator.utils.project.llm_profiles import LLM_OCR_KEY, LLM_TRANSLATOR_KEY, runtime_profile
 from ballontranslator.utils.project.proj_imgtrans import ProjImgTrans
 from ballontranslator.modules import (
     GET_VALID_INPAINTERS,
     GET_VALID_OCR,
     GET_VALID_TEXTDETECTORS,
     GET_VALID_TRANSLATORS,
+    GET_VALID_UPSCALERS,
 )
 
 
@@ -347,7 +349,7 @@ class RunPipelineDialog(QDialog):
     module_selected = Signal(str, str)
     module_config_requested = Signal(str, str)
     RESIZE_BORDER_WIDTH = 5
-    _module_settings_expanded = (False, False, False, False)
+    _module_settings_expanded = (False, False, False, False, False)
     _page_range = (1, None)
 
     def __init__(
@@ -612,6 +614,11 @@ class RunPipelineDialog(QDialog):
         stage_layout.setContentsMargins(2, 4, 2, 2)
         stage_layout.setHorizontalSpacing(24)
         stage_layout.setVerticalSpacing(8)
+        valid_upscalers = GET_VALID_UPSCALERS()
+        current_upscaler = pcfg.module.upscaler
+        if current_upscaler not in valid_upscalers:
+            current_upscaler = valid_upscalers[0] if valid_upscalers else 'None'
+
         stage_specs = (
             (
                 0,
@@ -650,6 +657,16 @@ class RunPipelineDialog(QDialog):
                 GET_VALID_TRANSLATORS(),
                 self.tr('Translation'),
                 LLM_MODALITY_TEXT,
+                '',
+                '',
+            ),
+            (
+                4,
+                'upscaler',
+                current_upscaler,
+                valid_upscalers,
+                self.tr('Upscaling'),
+                LLM_MODALITY_IMAGE,
                 '',
                 '',
             ),
@@ -715,6 +732,7 @@ class RunPipelineDialog(QDialog):
             (self.tr('OCR'), self._build_ocr_settings),
             (self.tr('Inpainting'), self._build_inpainting_settings),
             (self.tr('Translation'), self._build_translation_settings),
+            (self.tr('Upscaling'), self._build_upscaler_settings),
         )
         for index, (title, builder) in enumerate(section_specs):
             section, section_body, section_layout = self._add_settings_section(
@@ -749,6 +767,127 @@ class RunPipelineDialog(QDialog):
         )
         layout.addWidget(self.page_range_progress)
         self._refresh_progress()
+
+    def _scan_project_page_dimensions(self):
+        """Find the most frequent (mode) dimension (w, h) in the project."""
+        import os.path as osp
+        from collections import Counter
+        from PIL import Image
+
+        page_names = self._project_page_names()
+        if not page_names or not self.project or not getattr(self.project, 'directory', None):
+            return (0, 0, 0, 0)
+
+        counter = Counter()
+        for name in page_names:
+            img_path = osp.join(self.project.directory, name)
+            if osp.isfile(img_path):
+                try:
+                    with Image.open(img_path) as img:
+                        counter[img.size] += 1
+                except Exception:
+                    continue
+
+        if not counter:
+            return (0, 0, 0, 0)
+
+        (mode_w, mode_h), count = counter.most_common(1)[0]
+        total = sum(counter.values())
+        return (mode_w, mode_h, count, total)
+
+    def _build_dimension_standardization_settings(self, section: QWidget, layout: QVBoxLayout):
+        mode_w, mode_h, count, total = self._scan_project_page_dimensions()
+        if mode_w > 0 and (pcfg.module.standardize_target_width <= 0 or pcfg.module.standardize_target_height <= 0):
+            pcfg.module.standardize_target_width = mode_w
+            pcfg.module.standardize_target_height = mode_h
+
+        dim_container = QWidget(section)
+        dim_container.setObjectName('RunPipelineDimensionContainer')
+        dim_vbox = QVBoxLayout(dim_container)
+        dim_vbox.setContentsMargins(0, 4, 0, 4)
+        dim_vbox.setSpacing(6)
+
+        self.standardize_dim_cb = QCheckBox(self.tr('Standardize page dimensions'), dim_container)
+        self.standardize_dim_cb.setObjectName('RunPipelineStandardizeDimensions')
+        self.standardize_dim_cb.setChecked(pcfg.module.standardize_dimensions)
+        self._checkbox_settings[self.standardize_dim_cb] = (pcfg.module, 'standardize_dimensions')
+        self.standardize_dim_cb.toggled.connect(self._on_checkbox_setting_toggled)
+        dim_vbox.addWidget(self.standardize_dim_cb)
+
+        detail_widget = QWidget(dim_container)
+        detail_layout = QHBoxLayout(detail_widget)
+        detail_layout.setContentsMargins(20, 0, 0, 0)
+        detail_layout.setSpacing(8)
+
+        if total > 0:
+            diff_count = total - count
+            status_text = self.tr('Detected standard: {w}x{h} ({cnt}/{tot} pages match)').format(
+                w=mode_w, h=mode_h, cnt=count, tot=total
+            )
+            if diff_count > 0:
+                status_text += ' ' + self.tr('({diff} pages will be resized)').format(diff=diff_count)
+            else:
+                status_text += ' ' + self.tr('(All pages uniform)')
+        else:
+            status_text = self.tr('Target standard dimensions:')
+
+        self.dim_status_label = QLabel(status_text, dim_container)
+        self.dim_status_label.setStyleSheet('color: #8e99b1; font-size: 11px; margin-left: 20px;')
+        dim_vbox.addWidget(self.dim_status_label)
+
+        w_label = QLabel(self.tr('W:'), detail_widget)
+        self.target_w_spin = QSpinBox(detail_widget)
+        self.target_w_spin.setRange(100, 10000)
+        self.target_w_spin.setValue(pcfg.module.standardize_target_width if pcfg.module.standardize_target_width > 0 else (mode_w or 1200))
+        self.target_w_spin.valueChanged.connect(self._on_target_w_changed)
+
+        h_label = QLabel(self.tr('H:'), detail_widget)
+        self.target_h_spin = QSpinBox(detail_widget)
+        self.target_h_spin.setRange(100, 10000)
+        self.target_h_spin.setValue(pcfg.module.standardize_target_height if pcfg.module.standardize_target_height > 0 else (mode_h or 1800))
+        self.target_h_spin.valueChanged.connect(self._on_target_h_changed)
+
+        auto_detect_btn = QPushButton(self.tr('Auto Detect'), detail_widget)
+        auto_detect_btn.setToolTip(self.tr('Scan pages and recommend most frequent dimension'))
+        auto_detect_btn.clicked.connect(self._on_auto_detect_dimensions)
+
+        detail_layout.addWidget(w_label)
+        detail_layout.addWidget(self.target_w_spin)
+        detail_layout.addWidget(h_label)
+        detail_layout.addWidget(self.target_h_spin)
+        detail_layout.addWidget(auto_detect_btn)
+        detail_layout.addStretch()
+
+        dim_vbox.addWidget(detail_widget)
+        detail_widget.setVisible(self.standardize_dim_cb.isChecked())
+        self.dim_status_label.setVisible(self.standardize_dim_cb.isChecked())
+        self.standardize_dim_cb.toggled.connect(detail_widget.setVisible)
+        self.standardize_dim_cb.toggled.connect(self.dim_status_label.setVisible)
+
+        layout.addWidget(dim_container)
+
+    def _on_target_w_changed(self, val: int):
+        pcfg.module.standardize_target_width = val
+
+    def _on_target_h_changed(self, val: int):
+        pcfg.module.standardize_target_height = val
+
+    def _on_auto_detect_dimensions(self):
+        mode_w, mode_h, count, total = self._scan_project_page_dimensions()
+        if mode_w > 0 and mode_h > 0:
+            self.target_w_spin.setValue(mode_w)
+            self.target_h_spin.setValue(mode_h)
+            pcfg.module.standardize_target_width = mode_w
+            pcfg.module.standardize_target_height = mode_h
+            diff = total - count
+            text = self.tr('Detected standard: {w}x{h} ({cnt}/{tot} pages match)').format(
+                w=mode_w, h=mode_h, cnt=count, tot=total
+            )
+            if diff > 0:
+                text += ' ' + self.tr('({diff} pages will be resized)').format(diff=diff)
+            else:
+                text += ' ' + self.tr('(All pages uniform)')
+            self.dim_status_label.setText(text)
 
     def _add_checkbox_setting(
         self,
@@ -1415,6 +1554,80 @@ class RunPipelineDialog(QDialog):
         settings_section.updateGeometry()
         settings_section.parentWidget().updateGeometry()
 
+    def _get_current_upscale_scale(self, target: str = None) -> int:
+        if target is None:
+            target = pcfg.module.upscaler
+        valid = GET_VALID_UPSCALERS()
+        if target not in valid and valid:
+            target = valid[0]
+        params = pcfg.module.get_params('upscaler').get(target, {})
+        val = params.get('scale', 1)
+        if isinstance(val, dict) and 'value' in val:
+            val = val['value']
+        try:
+            return int(val)
+        except Exception:
+            return 1
+
+    def _update_upscale_scale_selector(self, module_name: str = None) -> None:
+        if not hasattr(self, 'upscale_scale_selector'):
+            return
+        cur_scale = self._get_current_upscale_scale(module_name)
+        idx = [1, 2, 4].index(cur_scale) if cur_scale in [1, 2, 4] else 0
+        blocker = QSignalBlocker(self.upscale_scale_selector)
+        self.upscale_scale_selector.setCurrentIndex(idx)
+        del blocker
+
+    def _on_upscale_scale_changed(self, index: int) -> None:
+        if not hasattr(self, 'upscale_scale_selector'):
+            return
+        scale_val = self.upscale_scale_selector.currentData()
+        if scale_val is None:
+            return
+        target = pcfg.module.upscaler
+        valid = GET_VALID_UPSCALERS()
+        if target not in valid and valid:
+            target = valid[0]
+        params = pcfg.module.get_params('upscaler').setdefault(target, {})
+        if isinstance(params.get('scale'), dict):
+            params['scale']['value'] = scale_val
+        else:
+            params['scale'] = scale_val
+        save_config()
+
+    def _build_upscaler_settings(self, section: QWidget, layout: QVBoxLayout) -> None:
+        self.upscale_denoise_cb = self._add_checkbox_setting(
+            section,
+            layout,
+            'RunPipelineUpscaleDenoise',
+            self.tr('Denoise'),
+            pcfg.module.upscale_denoise,
+            pcfg.module,
+            'upscale_denoise',
+        )
+
+        scale_row = QWidget(section)
+        scale_layout = QHBoxLayout(scale_row)
+        scale_layout.setContentsMargins(0, 0, 0, 0)
+        scale_layout.setSpacing(12)
+        scale_label = QLabel(self.tr('Scale Ratio'), scale_row)
+        scale_label.setObjectName('RunPipelineSettingLabel')
+        scale_layout.addWidget(scale_label)
+        self.upscale_scale_selector = BottomBorderComboBox(scale_row)
+        self.upscale_scale_selector.setObjectName('RunPipelineUpscaleScaleSelector')
+        self.upscale_scale_selector.setFixedWidth(RUN_PIPELINE_SETTING_CONTROL_WIDTH)
+        for s in [1, 2, 4]:
+            self.upscale_scale_selector.addItem(f'{s}x', s)
+        cur_scale = self._get_current_upscale_scale()
+        idx = [1, 2, 4].index(cur_scale) if cur_scale in [1, 2, 4] else 0
+        self.upscale_scale_selector.setCurrentIndex(idx)
+        self.upscale_scale_selector.currentIndexChanged.connect(self._on_upscale_scale_changed)
+        scale_layout.addWidget(self.upscale_scale_selector)
+        scale_layout.addStretch()
+        layout.addWidget(scale_row)
+
+        self._build_dimension_standardization_settings(section, layout)
+
     def _on_llm_overwrite_summary_toggled(self, checked: bool) -> None:
         pcfg.module.llm_translate_overwrite_summary = checked
 
@@ -1533,6 +1746,11 @@ class RunPipelineDialog(QDialog):
         checked: bool,
     ):
         pcfg.module.set_stage_enabled(stage_index, checked)
+        if stage_index == 4 and checked:
+            valid = GET_VALID_UPSCALERS()
+            if pcfg.module.upscaler not in valid and valid:
+                pcfg.module.upscaler = valid[0]
+                self.setModuleSelection('upscaler', valid[0])
         section = self.settings_sections.get(section_index)
         section_body = self.module_settings_bodies.get(section_index)
         if section is not None:
@@ -1557,6 +1775,8 @@ class RunPipelineDialog(QDialog):
     def setModuleSelection(self, module_type: str, module_name: str) -> None:
         if module_type == 'ocr':
             self._set_llm_ocr_settings_visible(module_name)
+        elif module_type == 'upscaler':
+            self._update_upscale_scale_selector(module_name)
         for activator in self.module_activators:
             if activator.module_type == module_type:
                 activator.setModule(module_name)

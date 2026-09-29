@@ -27,9 +27,9 @@ from ballontranslator.modules.exceptions import (
     ModuleRunError,
 )
 from ballontranslator.modules.base import BaseModule, soft_empty_cache
-from ballontranslator.modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, \
-    GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, \
-    BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, merge_config_module_params
+from ballontranslator.modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, UPSCALERS, \
+    GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, GET_VALID_UPSCALERS, \
+    BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, UpscalerBase, merge_config_module_params
 import ballontranslator.modules as modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
 from ballontranslator.utils.text.textblock import TextBlock, sort_regions
@@ -143,6 +143,7 @@ class ModuleManager(QObject):
         self.inpaint_thread.finish_inpaint.connect(self.on_finish_inpaint)
         self.inpaint_thread.inpaint_failed.connect(self.on_canvas_inpaint_failed)
         self.inpaint_thread.finished.connect(self._continue_canvas_inpaint)
+        self._upscaler = None
 
         self.prepare_msgbox = ProgressMessageBox(self.tr('Preparing module: '), True, parent_widget)
         self.prepare_msgbox.stop_clicked.connect(self.cancelModulePreparation)
@@ -178,6 +179,8 @@ class ModuleManager(QObject):
             cfg_module.textdetector_params, GET_VALID_TEXTDETECTORS(), TEXTDETECTORS.get)
         merge_config_module_params(
             cfg_module.ocr_params, GET_VALID_OCR(), OCR.get)
+        merge_config_module_params(
+            cfg_module.upscaler_params, GET_VALID_UPSCALERS(), UPSCALERS.get)
 
         config_panel.unload_models.connect(self.unload_all_models)
         config_panel.prepare_selected_modules.connect(self.prepareSelectedModules)
@@ -712,6 +715,10 @@ class ModuleManager(QObject):
     def ocr(self) -> OCRBase:
         return self.ocr_thread.ocr
 
+    @property
+    def upscaler(self) -> UpscalerBase:
+        return getattr(self, '_upscaler', None)
+
     def inpainterBusy(self):
         return self.inpaint_thread.isRunning()
 
@@ -1048,6 +1055,9 @@ class ModuleManager(QObject):
     def selectOCR(self, ocr: str = None):
         self._select_module('ocr', ocr, GET_VALID_OCR())
 
+    def selectUpscaler(self, upscaler: str = None):
+        self._select_module('upscaler', upscaler, GET_VALID_UPSCALERS())
+
     def setTranslator(self, translator: str = None):
         if translator is None:
             translator = cfg_module.translator
@@ -1177,7 +1187,8 @@ class ModuleManager(QObject):
             'inpainter': self.inpainter,
             'textdetector': self.textdetector,
             'ocr': self.ocr,
-        }[module_key]
+            'upscaler': self.upscaler,
+        }.get(module_key)
 
     def onModuleParamEdited(
         self,

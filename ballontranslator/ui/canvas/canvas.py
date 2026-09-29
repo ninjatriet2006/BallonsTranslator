@@ -231,6 +231,7 @@ class Canvas(QGraphicsScene):
     path_reorder_finished = Signal(object)
     path_reorder_mode_changed = Signal(bool)
     projective_scale_requested = Signal(object)
+    run_upscale_page = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1504,6 +1505,8 @@ class Canvas(QGraphicsScene):
             ocr_translate_act = menu.addAction(self.tr("OCR and translate"))
             ocr_translate_inpaint_act = menu.addAction(self.tr("OCR, translate and inpaint"))
             inpaint_act = menu.addAction(self.tr("inpaint"))
+            menu.addSeparator()
+            upscale_act = menu.addAction(self.tr("Upscale / Enhance Current Page"))
 
             rst = menu.exec(pos)
             
@@ -1539,6 +1542,8 @@ class Canvas(QGraphicsScene):
                 self.run_blktrans.emit(2)
             elif rst == inpaint_act:
                 self.run_blktrans.emit(3)
+            elif rst == upscale_act:
+                self.run_upscale_page.emit()
 
     @property
     def have_selected_blkitem(self):

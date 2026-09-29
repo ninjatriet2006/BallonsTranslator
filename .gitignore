@@ -68,3 +68,16 @@ Ultralytics/settings.json
 config/custom_dictionary.txt
 data/dictionaries/
 .gitnexus
+# Environment & Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log

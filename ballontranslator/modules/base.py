@@ -513,6 +513,11 @@ MODULE_SCRIPTS = {
         'module_package': 'ballontranslator.modules.ocr',
         'module_pattern': r'ocr_(.*?).py',
     },
+    'upscaler': {
+        'module_dir': str(MODULE_ROOT / 'upscale'),
+        'module_package': 'ballontranslator.modules.upscale',
+        'module_pattern': r'upscale_(.*?).py',
+    },
 }
     
 def import_module_registries(target_modules=None):

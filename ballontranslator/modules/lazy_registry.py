@@ -26,6 +26,7 @@ DECORATORS = {
     'textdetector': {'register_textdetectors'},
     'inpainter': {'register_inpainter'},
     'ocr': {'register_OCR'},
+    'upscaler': {'register_upscaler'},
 }
 
 EXTRA_MODULE_FILES = {

@@ -23,7 +23,14 @@ from ballontranslator.utils.text.text_effects import (
 )
 from ballontranslator.utils.project import shared
 from ballontranslator.utils.project.message import create_error_dialog, create_info_dialog
-from ballontranslator.modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
+from ballontranslator.modules import (
+    GET_VALID_TEXTDETECTORS,
+    GET_VALID_INPAINTERS,
+    GET_VALID_TRANSLATORS,
+    GET_VALID_OCR,
+    GET_VALID_UPSCALERS,
+    UPSCALERS,
+)
 from ballontranslator.ui.core.misc import parse_stylesheet, set_html_family, QKEY, ndarray2pixmap
 from .text_engine.item import TextBlkItem
 from ballontranslator.utils.project.config import (
@@ -418,6 +425,7 @@ class MainWindow(mainwindow_cls):
             self.bottomBar.ocr_selector,
             self.bottomBar.trans_selector,
             self.bottomBar.inpaint_selector,
+            self.bottomBar.upscale_selector,
         )
         if 0 <= idx < len(module_widgets):
             module_widgets[idx].setVisible(visible)
@@ -447,6 +455,9 @@ class MainWindow(mainwindow_cls):
             self.bottomBar.inpaint_selector.setSelectedValue(module_name)
             self.drawingPanel.setInpainter(module_name)
             profile_id = pcfg.module.inpaint_llm_id
+        elif module_key == 'upscaler':
+            self.bottomBar.upscale_selector.setSelectedValue(module_name)
+            self.bottomBar.upscale_selector.updateButtonText()
         if profile_id:
             self.configPanel.llm_profiles_panel.refreshSelectionBorders(profile_id)
 
@@ -460,6 +471,9 @@ class MainWindow(mainwindow_cls):
         pcfg.module.ocr = valid_or_first(pcfg.module.ocr, GET_VALID_OCR())
         pcfg.module.inpainter = valid_or_first(pcfg.module.inpainter, GET_VALID_INPAINTERS())
         pcfg.module.translator = valid_or_first(pcfg.module.translator, GET_VALID_TRANSLATORS())
+        if pcfg.module.upscaler not in (['None'] + GET_VALID_UPSCALERS()):
+            pcfg.module.upscaler = 'None'
+            pcfg.module.enable_upscale = False
 
     def setupConfig(self):
 
@@ -468,10 +482,16 @@ class MainWindow(mainwindow_cls):
         self.bottomBar.ocr_selector.selector.addItems(GET_VALID_OCR())
         self.bottomBar.textdet_selector.selector.addItems(GET_VALID_TEXTDETECTORS())
         self.bottomBar.inpaint_selector.selector.addItems(GET_VALID_INPAINTERS())
+        self.bottomBar.upscale_selector.selector.addItems(['None'] + GET_VALID_UPSCALERS())
 
         self.bottomBar.textdet_selector.setSelectedValue(pcfg.module.textdetector)
         self.bottomBar.ocr_selector.setSelectedValue(pcfg.module.ocr)
         self.bottomBar.inpaint_selector.setSelectedValue(pcfg.module.inpainter)
+        initial_upscaler = pcfg.module.upscaler if pcfg.module.enable_upscale else 'None'
+        self.bottomBar.upscale_selector.setSelectedValue(initial_upscaler)
+        self.bottomBar.upscale_selector.cfg_clicked.connect(self.to_upscale_config)
+        self.bottomBar.upscale_selector.updateButtonText()
+        self.canvas.run_upscale_page.connect(self.on_run_upscale_current_page)
         self.drawingPanel.setInpainterOptions(
             GET_VALID_INPAINTERS(),
             pcfg.module.inpainter,
@@ -1728,6 +1748,113 @@ class MainWindow(mainwindow_cls):
     def to_detect_config(self):
         self.show_module_param_dialog('textdetector', pcfg.module.textdetector)
 
+    def to_upscale_config(self):
+        target = pcfg.module.upscaler
+        valid_upscalers = GET_VALID_UPSCALERS()
+        if target == 'None' or target not in valid_upscalers:
+            if valid_upscalers:
+                target = valid_upscalers[0]
+                pcfg.module.upscaler = target
+                pcfg.module.enable_upscale = True
+                self.bottomBar.upscale_selector.updateButtonText()
+        if target != 'None':
+            self.show_module_param_dialog('upscaler', target)
+
+    def on_run_upscale_current_page(self):
+        if not self.imgtrans_proj.img_valid:
+            return
+
+        upscaler_name = pcfg.module.upscaler
+        valid_upscalers = GET_VALID_UPSCALERS()
+        if upscaler_name == 'None' or upscaler_name not in valid_upscalers:
+            if valid_upscalers:
+                upscaler_name = valid_upscalers[0]
+                pcfg.module.upscaler = upscaler_name
+                pcfg.module.enable_upscale = True
+                self.bottomBar.upscale_selector.updateButtonText()
+            else:
+                LOGGER.warning('No valid upscaler modules available.')
+                return
+
+        spec = UPSCALERS.get_spec(upscaler_name)
+        if spec is None:
+            return
+
+        from ballontranslator.modules.prepare_local_files import ensure_module_files
+        try:
+            self.statusBar().showMessage(self.tr('Preparing upscaler {name}...').format(name=upscaler_name))
+            if not ensure_module_files(spec):
+                LOGGER.error(f'Failed to prepare upscaler files for {upscaler_name}')
+                return
+        except Exception as e:
+            LOGGER.error(f'Error preparing upscaler: {e}')
+            return
+
+        upscaler_cls = UPSCALERS.get(upscaler_name)
+        saved_params = pcfg.module.get_params('upscaler').get(upscaler_name, {})
+        scale_val = 1
+        if 'scale' in saved_params:
+            s_item = saved_params['scale']
+            scale_val = s_item.get('value', 1) if isinstance(s_item, dict) else s_item
+        denoise_val = pcfg.module.upscale_denoise
+        if scale_val <= 1 and not denoise_val:
+            self.statusBar().showMessage(self.tr('Upscale skipped: Scale is 1x and Denoise is Off.'), 4000)
+            return
+
+        self.statusBar().showMessage(self.tr('Upscaling page with {name} (scale: {scale}x, denoise: {denoise})...').format(
+            name=upscaler_name,
+            scale=scale_val,
+            denoise='On' if denoise_val else 'Off',
+        ))
+
+        try:
+            instance = upscaler_cls(**saved_params)
+            src_img = self.imgtrans_proj.img_array
+            old_h, old_w = src_img.shape[:2]
+            upscaled = instance.upscale(src_img, scale=scale_val, denoise=denoise_val)
+            if upscaled is None:
+                raise ValueError('Upscaler returned None')
+
+            new_h, new_w = upscaled.shape[:2]
+            actual_scale_x = new_w / old_w
+            actual_scale_y = new_h / old_h
+
+            if actual_scale_x != 1.0 or actual_scale_y != 1.0:
+                current_blks = self.imgtrans_proj.pages.get(self.imgtrans_proj.current_img, [])
+                for blk in current_blks:
+                    blk.xywh = [
+                        round(blk.xywh[0] * actual_scale_x),
+                        round(blk.xywh[1] * actual_scale_y),
+                        round(blk.xywh[2] * actual_scale_x),
+                        round(blk.xywh[3] * actual_scale_y),
+                    ]
+                    if hasattr(blk, 'font_size') and blk.font_size:
+                        blk.font_size = round(blk.font_size * actual_scale_y)
+                    if hasattr(blk, 'lines') and blk.lines is not None:
+                        try:
+                            scaled_lines = []
+                            for line in blk.lines:
+                                scaled_lines.append([[pt[0] * actual_scale_x, pt[1] * actual_scale_y] for pt in line])
+                            blk.lines = scaled_lines
+                        except Exception:
+                            pass
+
+            import cv2
+            curr_img_path = self.imgtrans_proj.current_img_path()
+            cv2.imwrite(curr_img_path, upscaled)
+            self.imgtrans_proj.img_array = upscaled
+            self.imgtrans_proj.inpainted_array = upscaled.copy()
+            self.canvas.updateCanvas()
+            from ballontranslator.ui.text_engine.editing.manager import SceneTextReplacementReason
+            self.st_manager.clearSceneTextitems(SceneTextReplacementReason.PAGE_CHANGE)
+            self.st_manager.populateSceneTextitems()
+            self.canvas.setProjSaveState(True)
+            self.statusBar().showMessage(self.tr('Page enhanced successfully: {new_w}x{new_h}').format(new_w=new_w, new_h=new_h), 5000)
+            LOGGER.info(f"Page '{self.imgtrans_proj.current_img}' upscaled with {upscaler_name} ({old_w}x{old_h} -> {new_w}x{new_h})")
+        except Exception as e:
+            LOGGER.error(f'Failed to upscale page: {e}')
+            self.statusBar().showMessage(self.tr('Upscale failed: {error}').format(error=str(e)), 5000)
+
     def show_module_param_dialog(
         self,
         module_type: str,
@@ -1794,6 +1921,7 @@ class MainWindow(mainwindow_cls):
             'ocr': self.module_manager.selectOCR,
             'translator': self.module_manager.selectTranslator,
             'inpainter': self.module_manager.selectInpainter,
+            'upscaler': self.module_manager.selectUpscaler,
         }[module_type]
         setter(module_name)
         dialog = self.sender()

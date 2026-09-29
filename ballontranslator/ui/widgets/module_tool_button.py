@@ -219,6 +219,7 @@ class ModuleSelectionWidget(Widget):
         icon_filename: str,
         llm_modality: str = '',
         icon_color: str = '',
+        is_upscaler: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -227,6 +228,7 @@ class ModuleSelectionWidget(Widget):
         self.icon_filename = icon_filename
         self.icon_color = icon_color
         self.llm_modality = llm_modality
+        self.is_upscaler = is_upscaler
         if self._has_llm_modality():
             self._configure_modality(llm_modality)
         self.selector = SmallComboBox()
@@ -346,6 +348,31 @@ class ModuleSelectionWidget(Widget):
 
     def rebuildMenu(self):
         self.menu.clear()
+        if getattr(self, 'is_upscaler', False):
+            from ballontranslator.modules import GET_VALID_UPSCALERS
+            self._section(self.tr('Model'), color=self.icon_color)
+            models = ['None'] + GET_VALID_UPSCALERS()
+            current_model = pcfg.module.upscaler if getattr(pcfg.module, 'enable_upscale', False) else 'None'
+            for m in models:
+                _add_bottom_menu_action(
+                    self.menu,
+                    m,
+                    m == current_model,
+                    m,
+                    self._select_upscaler_model_action,
+                )
+            self._section(self.tr('Denoise'), color=self.icon_color)
+            current_denoise = getattr(pcfg.module, 'upscale_denoise', True)
+            for opt, val in (('On', True), ('Off', False)):
+                _add_bottom_menu_action(
+                    self.menu,
+                    opt,
+                    val == current_denoise,
+                    val,
+                    self._select_upscaler_denoise_action,
+                )
+            return
+
         current_module = self.selector.currentText()
         if self._has_llm_modality():
             self._section(self.fallback_name)
@@ -520,7 +547,39 @@ class ModuleSelectionWidget(Widget):
         model = str(getattr(profile, self.model_attr) or '').strip()
         return _simplify_llm_model_name(model) or profile.name or self.llm_key
 
+    def _select_upscaler_model_action(self, _checked: bool = False):
+        action = self.sender()
+        if not isinstance(action, QAction):
+            return
+        model = str(action.data())
+        if model == 'None':
+            pcfg.module.upscaler = 'None'
+            pcfg.module.enable_upscale = False
+        else:
+            pcfg.module.upscaler = model
+            pcfg.module.enable_upscale = True
+        self.selector.setCurrentText(pcfg.module.upscaler)
+        self.updateButtonText()
+
+    def _select_upscaler_denoise_action(self, _checked: bool = False):
+        action = self.sender()
+        if not isinstance(action, QAction):
+            return
+        val = bool(action.data())
+        pcfg.module.upscale_denoise = val
+        self.updateButtonText()
+
     def updateButtonText(self, *args):
+        if getattr(self, 'is_upscaler', False):
+            model = getattr(pcfg.module, 'upscaler', 'None')
+            if model == 'None' or not getattr(pcfg.module, 'enable_upscale', False):
+                name = self.tr('Upscaler: None')
+            else:
+                denoise_str = 'On' if getattr(pcfg.module, 'upscale_denoise', True) else 'Off'
+                name = f'{model} ({denoise_str})'
+            self.tool_btn.setText(_bottom_tool_button_text(name))
+            return
+
         name = self.selector.currentText()
         is_llm = self._is_current_llm()
         if is_llm:

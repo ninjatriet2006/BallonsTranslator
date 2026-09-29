@@ -88,9 +88,9 @@ class DemoDetector:
         self.assertEqual(validate_lazy_module_specs(specs), [])
 
     def test_current_lazy_registry_metadata_is_complete(self):
-        from ballontranslator.modules import GET_VALID_TEXTDETECTORS, INPAINTERS, OCR, TEXTDETECTORS, TRANSLATORS
+        from ballontranslator.modules import GET_VALID_TEXTDETECTORS, INPAINTERS, OCR, TEXTDETECTORS, TRANSLATORS, UPSCALERS
 
-        registries = [TRANSLATORS, TEXTDETECTORS, OCR, INPAINTERS]
+        registries = [TRANSLATORS, TEXTDETECTORS, OCR, INPAINTERS, UPSCALERS]
         specs = [registry.get_spec(key) for registry in registries for key in registry.module_dict]
 
         self.assertEqual(validate_lazy_module_specs([spec for spec in specs if spec is not None]), [])

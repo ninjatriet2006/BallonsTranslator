@@ -4,7 +4,7 @@ import threading
 import concurrent.futures
 from typing import Callable, List, Optional, Union
 import os.path as osp
-
+import cv2
 import numpy as np
 from packaging.requirements import Requirement
 from qtpy.QtCore import QThread, Signal, QObject, QLocale, QTimer
@@ -27,8 +27,8 @@ from ballontranslator.modules.exceptions import (
     ModuleRunError,
 )
 from ballontranslator.modules.base import BaseModule, soft_empty_cache
-from ballontranslator.modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, \
-    GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, \
+from ballontranslator.modules import INPAINTERS, TRANSLATORS, TEXTDETECTORS, OCR, UPSCALERS, \
+    GET_VALID_TRANSLATORS, GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_OCR, GET_VALID_UPSCALERS, \
     BaseTranslator, InpainterBase, TextDetectorBase, OCRBase, merge_config_module_params
 import ballontranslator.modules as modules
 modules.translators.SYSTEM_LANG = QLocale.system().name()
@@ -1149,6 +1149,8 @@ class ImgtransThread(QThread):
 
         self.pipeline_start_time = time.time()
         active_stages = []
+        if cfg_module.enable_upscale and cfg_module.upscaler != 'None':
+            active_stages.append(f'Upscale({cfg_module.upscaler})')
         if cfg_module.enable_detect:
             active_stages.append(f'Detect({cfg_module.textdetector})')
         if cfg_module.enable_ocr:
@@ -1187,6 +1189,21 @@ class ImgtransThread(QThread):
         if self.parallel_trans and cfg_module.enable_translate:
             self.translate_thread.runTranslatePipeline(self.imgtrans_proj, self.stop_event)
 
+        upscaler_instance = None
+        if cfg_module.enable_upscale and cfg_module.upscaler != 'None':
+            upscaler_name = cfg_module.upscaler
+            valid_upscalers = GET_VALID_UPSCALERS()
+            if upscaler_name in valid_upscalers:
+                try:
+                    spec = UPSCALERS.get_spec(upscaler_name)
+                    if spec and hasattr(spec, 'ensure_files'):
+                        spec.ensure_files()
+                    upscaler_cls = UPSCALERS.get(upscaler_name)
+                    saved_params = cfg_module.get_params('upscaler').get(upscaler_name, {})
+                    upscaler_instance = upscaler_cls(**saved_params)
+                except Exception as e:
+                    LOGGER.error(f'Failed to initialize upscaler {upscaler_name}: {e}')
+
         for imgname in pages_to_iterate:
             
             # 检查是否请求停止
@@ -1197,6 +1214,71 @@ class ImgtransThread(QThread):
             page_idx = self.imgtrans_proj.pagename2idx(imgname)
             page_num = page_idx + 1 if page_idx is not None and page_idx >= 0 else imgname
             img = self.imgtrans_proj.read_img(imgname)
+
+            if upscaler_instance is not None:
+                try:
+                    old_h, old_w = img.shape[:2]
+                    scale_param = cfg_module.get_params('upscaler').get(cfg_module.upscaler, {}).get('scale', 1)
+                    if isinstance(scale_param, dict) and 'value' in scale_param:
+                        scale_val = int(scale_param['value'])
+                    else:
+                        scale_val = int(scale_param)
+                    denoise_val = cfg_module.upscale_denoise
+                    if scale_val <= 1 and not denoise_val:
+                        LOGGER.info(f"[Upscale][{page_num}] Skipped: Scale is 1x and Denoise is Off.")
+                        if hasattr(RunStatus, 'FIN_UPSCALE'):
+                            self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_UPSCALE)
+                    else:
+                        upscaled = upscaler_instance.upscale(img, scale=scale_val, denoise=denoise_val)
+                        if upscaled is not None:
+                            new_h, new_w = upscaled.shape[:2]
+                            img = upscaled
+                            curr_img_path = osp.join(self.imgtrans_proj.directory, imgname)
+                            cv2.imwrite(curr_img_path, upscaled)
+                        if getattr(self.imgtrans_proj, 'current_img', None) == imgname:
+                            self.imgtrans_proj.img_array = upscaled
+                        if old_w > 0 and old_h > 0 and (new_w != old_w or new_h != old_h):
+                            scale_x = new_w / old_w
+                            scale_y = new_h / old_h
+                            if imgname in self.imgtrans_proj.pages:
+                                for blk in self.imgtrans_proj.pages[imgname]:
+                                    blk.xywh = [
+                                        round(blk.xywh[0] * scale_x),
+                                        round(blk.xywh[1] * scale_y),
+                                        round(blk.xywh[2] * scale_x),
+                                        round(blk.xywh[3] * scale_y),
+                                    ]
+                                    if hasattr(blk, 'font_size') and blk.font_size:
+                                        blk.font_size = round(blk.font_size * scale_y)
+                        LOGGER.info(f"[Upscale][{page_num}] Page '{imgname}' upscaled with {cfg_module.upscaler} ({old_w}x{old_h} -> {new_w}x{new_h})")
+                        if hasattr(RunStatus, 'FIN_UPSCALE'):
+                            self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_UPSCALE)
+                except Exception as e:
+                    LOGGER.error(f"[Upscale][{page_num}] Failed to upscale {imgname}: {e}")
+
+            if cfg_module.enable_upscale and cfg_module.standardize_dimensions and cfg_module.standardize_target_width > 0 and cfg_module.standardize_target_height > 0:
+                tgt_w = cfg_module.standardize_target_width
+                tgt_h = cfg_module.standardize_target_height
+                cur_h, cur_w = img.shape[:2]
+                if cur_w != tgt_w or cur_h != tgt_h:
+                    scale_x = tgt_w / cur_w
+                    scale_y = tgt_h / cur_h
+                    interp = cv2.INTER_AREA if (cur_w > tgt_w and cur_h > tgt_h) else cv2.INTER_LANCZOS4
+                    img = cv2.resize(img, (tgt_w, tgt_h), interpolation=interp)
+                    save_path = osp.join(self.imgtrans_proj.directory, imgname)
+                    cv2.imwrite(save_path, img)
+                    if imgname in self.imgtrans_proj.pages:
+                        for blk in self.imgtrans_proj.pages[imgname]:
+                            blk.xywh = [
+                                round(blk.xywh[0] * scale_x),
+                                round(blk.xywh[1] * scale_y),
+                                round(blk.xywh[2] * scale_x),
+                                round(blk.xywh[3] * scale_y),
+                            ]
+                            if hasattr(blk, 'font_size') and blk.font_size:
+                                blk.font_size = round(blk.font_size * scale_y)
+                    LOGGER.info(f"[Standardize] Page '{imgname}' resized: {cur_w}x{cur_h} -> {tgt_w}x{tgt_h}")
+
             mask = blk_list = None
             need_save_mask = False
             blk_removed: List[TextBlock] = []
