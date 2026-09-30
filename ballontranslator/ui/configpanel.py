@@ -569,11 +569,11 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         pipeline_options_layout.addWidget(self.fault_tolerant_checker)
 
         self.enable_verify_checker = QCheckBox(
-            self.tr('Enable translation stage verification (verify mode)')
+            self.tr('Enable multi-tier pipeline verification (verify mode)')
         )
         self.enable_verify_checker.setObjectName('PipelineModuleActionCheckBox')
         self.enable_verify_checker.setToolTip(
-            self.tr('Audit translated text blocks to verify translation quality and completion.')
+            self.tr('Activate multi-tier verification: Superior Vision verify (hybrid LLM+CTD), Translation completeness audit & self-correction, and Inpaint ghost-text residual QA.')
         )
         self.enable_verify_checker.stateChanged.connect(self.on_enable_verify_changed)
         pipeline_options_layout.addWidget(self.enable_verify_checker)

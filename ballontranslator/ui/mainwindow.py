@@ -2695,20 +2695,43 @@ class MainWindow(mainwindow_cls):
         self.on_run_imgtrans()
 
     def on_create_errdialog(self, error_msg: str, detail_traceback: str = '', exception_type: str = ''):
+        if getattr(self, '_active_errdialog', None) is not None:
+            LOGGER.warning(f"Error dialog already active. Suppressed concurrent popup: {error_msg}")
+            return
+
         try:
             if exception_type != '':
                 shared.showed_exception.add(exception_type)
-            err = QMessageBox()
-            err.setText(error_msg)
-            err.setDetailedText(detail_traceback)
+            err = QMessageBox(self)
+            self._active_errdialog = err
+            err.setWindowTitle(self.tr('Error'))
+            icon_critical = getattr(getattr(QMessageBox, 'Icon', QMessageBox), 'Critical')
+            err.setIcon(icon_critical)
+            err.setText(str(error_msg or ''))
+            if detail_traceback:
+                err.setDetailedText(str(detail_traceback))
+            err.setSizeGripEnabled(True)
+            err.setStyleSheet("""
+                QLabel#qt_msgbox_label {
+                    min-width: 440px;
+                    max-width: 580px;
+                }
+                QTextEdit {
+                    min-height: 140px;
+                    max-height: 300px;
+                    min-width: 440px;
+                    font-family: monospace;
+                    font-size: 11px;
+                }
+            """)
             err.exec()
-            if exception_type != '':
-                shared.showed_exception.remove(exception_type)
-        except:
-            if exception_type in shared.showed_exception:
-                shared.showed_exception.remove(exception_type)
+        except Exception:
             LOGGER.error('Failed to create error dialog')
             LOGGER.error(traceback.format_exc())
+        finally:
+            self._active_errdialog = None
+            if exception_type != '':
+                shared.showed_exception.discard(exception_type)
 
     def on_create_infodialog(self, info_dict: dict):
         QMessageBox.StandardButton.NoButton

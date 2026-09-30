@@ -145,6 +145,9 @@ class ModuleConfig(Config):
     verifier_llm_id: str = ''
     verify_detail: str = 'auto'
     verify_thinking: str = 'auto'
+    verify_detection: bool = True
+    verify_translation: bool = True
+    verify_inpaint: bool = True
     pipeline_fault_tolerant: bool = True
 
     def get_params(self, module_key: str, for_saving=False) -> dict:

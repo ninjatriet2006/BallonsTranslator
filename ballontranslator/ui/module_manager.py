@@ -161,6 +161,7 @@ class ModuleManager(QObject):
 
         self.imgtrans_thread = ImgtransThread(self.textdetect_thread, self.ocr_thread, self.translate_thread, self.inpaint_thread)
         self.imgtrans_thread.imgtrans_proj = self.imgtrans_proj
+        self.imgtrans_thread.update_upscale_progress.connect(self.on_update_upscale_progress)
         self.imgtrans_thread.update_detect_progress.connect(self.on_update_detect_progress)
         self.imgtrans_thread.update_ocr_progress.connect(self.on_update_ocr_progress)
         self.imgtrans_thread.update_translate_progress.connect(self.on_update_translate_progress)
@@ -823,6 +824,8 @@ class ModuleManager(QObject):
     ):
         if self.prepare_msgbox is not None and self.prepare_msgbox.isVisible():
             self.prepare_msgbox.done(0)
+        has_upscale = bool(cfg_module.enable_upscale and cfg_module.upscaler != 'None')
+        self.progress_msgbox.upscale_bar.setVisible(has_upscale)
         self.progress_msgbox.detect_bar.setVisible(cfg_module.enable_detect)
         self.progress_msgbox.ocr_bar.setVisible(cfg_module.enable_ocr)
         self.progress_msgbox.translate_bar.setVisible(cfg_module.enable_translate)
@@ -911,36 +914,45 @@ class ModuleManager(QObject):
         self.blktrans_pipeline_finished.emit(mode, blk_ids)
         self.progress_msgbox.hide()
 
-    def _on_update_stage_progress(self, stage: str, progress: int, update_progress: Callable[[int], None]):
+    def _on_update_stage_progress(self, stage: str, progress: int, update_progress: Callable[..., None], error_count: int = 0):
         try:
             ri = self.imgtrans_thread.recent_finished_index(progress)
             if stage in shared.pbar:
                 shared.pbar[stage].update(1)
-            progress = int(progress / self.imgtrans_thread.num_pages * 100)
-            update_progress(progress)
+            num_pages = self.imgtrans_thread.num_pages
+            progress_pct = int(progress / num_pages * 100) if num_pages > 0 else 0
+            try:
+                update_progress(progress_pct, error_count=error_count, total_count=num_pages)
+            except TypeError:
+                update_progress(progress_pct)
             if ri != self.last_finished_index:
                 self.last_finished_index = ri
                 self.page_trans_finished.emit(ri)
-            if progress == 100:
+            if progress_pct == 100:
                 self.finishImgtransPipeline()
         except Exception as e:
             LOGGER.error(f"Error in _on_update_stage_progress({stage}, {progress}): {e}")
 
-    def on_update_detect_progress(self, progress: int):
-        self._on_update_stage_progress('detect', progress, self.progress_msgbox.updateDetectProgress)
+    def on_update_upscale_progress(self, progress: int, error_count: int = 0):
+        self._on_update_stage_progress('upscale', progress, self.progress_msgbox.updateUpscaleProgress, error_count=error_count)
 
-    def on_update_ocr_progress(self, progress: int):
-        self._on_update_stage_progress('ocr', progress, self.progress_msgbox.updateOCRProgress)
+    def on_update_detect_progress(self, progress: int, error_count: int = 0):
+        self._on_update_stage_progress('detect', progress, self.progress_msgbox.updateDetectProgress, error_count=error_count)
 
-    def on_update_translate_progress(self, progress: int):
-        self._on_update_stage_progress('translate', progress, self.progress_msgbox.updateTranslateProgress)
+    def on_update_ocr_progress(self, progress: int, error_count: int = 0):
+        self._on_update_stage_progress('ocr', progress, self.progress_msgbox.updateOCRProgress, error_count=error_count)
 
-    def on_update_inpaint_progress(self, progress: int):
-        self._on_update_stage_progress('inpaint', progress, self.progress_msgbox.updateInpaintProgress)
+    def on_update_translate_progress(self, progress: int, error_count: int = 0):
+        self._on_update_stage_progress('translate', progress, self.progress_msgbox.updateTranslateProgress, error_count=error_count)
+
+    def on_update_inpaint_progress(self, progress: int, error_count: int = 0):
+        self._on_update_stage_progress('inpaint', progress, self.progress_msgbox.updateInpaintProgress, error_count=error_count)
 
     def progress(self):
         progress = {}
         num_pages = self.imgtrans_thread.num_pages
+        if cfg_module.enable_upscale and cfg_module.upscaler != 'None':
+            progress['upscale'] = self.imgtrans_thread.upscale_counter / num_pages if num_pages > 0 else 0
         if cfg_module.enable_detect:
             progress['detect'] = self.imgtrans_thread.detect_counter / num_pages
         if cfg_module.enable_ocr:
@@ -952,10 +964,11 @@ class ModuleManager(QObject):
         return progress
 
     def proj_finished(self):
-        if self.imgtrans_thread.detect_finished() \
+        if self.imgtrans_thread.upscale_finished() \
+            and self.imgtrans_thread.detect_finished() \
             and self.imgtrans_thread.ocr_finished() \
-                and self.imgtrans_thread.translate_finished() \
-                    and self.imgtrans_thread.inpaint_finished():
+            and self.imgtrans_thread.translate_finished() \
+            and self.imgtrans_thread.inpaint_finished():
             return True
         return False
 

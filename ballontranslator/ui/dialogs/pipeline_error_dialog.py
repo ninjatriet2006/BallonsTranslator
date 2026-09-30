@@ -89,9 +89,10 @@ class PipelineErrorDialog(OutsideClickFramelessMixin, QDialog):
         self.setObjectName('PipelineErrorDialog')
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumWidth(480)
-        self.setMaximumWidth(600)
-        self.setMaximumHeight(500)
+        self.setMinimumSize(520, 360)
+        self.resize(560, 440)
+        self.setMaximumWidth(700)
+        self.setMaximumHeight(650)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -112,23 +113,25 @@ class PipelineErrorDialog(OutsideClickFramelessMixin, QDialog):
         content_layout.setSpacing(12)
 
         # Title bar
-        title_layout = QHBoxLayout()
+        self.title_bar = QWidget(container)
+        self.title_bar.setObjectName('PipelineErrorTitleBar')
+        title_layout = QHBoxLayout(self.title_bar)
         title_layout.setContentsMargins(0, 0, 0, 0)
 
-        title_label = QLabel(self.tr('Pipeline Issues'), container)
+        title_label = QLabel(self.tr('Pipeline Issues'), self.title_bar)
         title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #f8fafc;")
         title_layout.addWidget(title_label)
 
-        count_badge = QLabel(f"{len(self.issues)} issue(s)", container)
+        count_badge = QLabel(f"{len(self.issues)} issue(s)", self.title_bar)
         count_badge.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
         title_layout.addWidget(count_badge)
         title_layout.addStretch()
 
-        close_btn = DialogCloseButton(container)
-        close_btn.clicked.connect(self.reject)
-        title_layout.addWidget(close_btn)
+        self.close_button = DialogCloseButton(self.title_bar)
+        self.close_button.clicked.connect(self.reject)
+        title_layout.addWidget(self.close_button)
 
-        content_layout.addLayout(title_layout)
+        content_layout.addWidget(self.title_bar)
 
         # Scroll area for issue cards
         scroll_area = QScrollArea(container)
@@ -212,3 +215,6 @@ class PipelineErrorDialog(OutsideClickFramelessMixin, QDialog):
         self.issues.clear()
         self.cleared.emit()
         self.accept()
+
+    def _dismiss_transient_window(self) -> None:
+        self.reject()

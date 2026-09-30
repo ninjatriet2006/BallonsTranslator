@@ -157,7 +157,10 @@ class OutsideClickFramelessMixin:
             watched is close_button or close_button.isAncestorOf(watched)
         ):
             return False
-        return watched is self.title_bar or self.title_bar.isAncestorOf(watched)
+        title_bar = getattr(self, 'title_bar', None)
+        if title_bar is None:
+            return False
+        return watched is title_bar or title_bar.isAncestorOf(watched)
 
     def _widget_inside_window(self, widget: QWidget) -> bool:
         while widget is not None:

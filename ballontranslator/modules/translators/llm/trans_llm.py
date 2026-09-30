@@ -421,14 +421,39 @@ class LLMTranslator(LLMChatRequester, BaseTranslator):
             text_trans = text_trans[0]
 
         if is_list and not empty_page_summary:
-            try:
-                assert len(text_trans) == len(text)
-            except Exception:
-                LOGGER.error(
-                    'This translator seems to messed up the translation which resulted in inconsistent translated line count.\n '
-                    'Set concate_text to False or change textblk_break in the source code may solve the problem.'
-                )
-                raise
+            from ballontranslator.modules.translators.translation_verifier import (
+                audit_translation,
+                self_correct_translation,
+            )
+            is_valid, bad_indices, issue_msg = audit_translation(text, text_trans)
+            if not is_valid:
+                LOGGER.warning(f"[Translation Audit] Issue detected: {issue_msg}")
+                if (
+                    getattr(pcfg.module, 'enable_verify', False)
+                    and getattr(pcfg.module, 'verify_translation', True)
+                ) or len(text_trans) != len(text):
+                    text_trans = self_correct_translation(
+                        self,
+                        text,
+                        text_trans,
+                        bad_indices,
+                        project=project,
+                        page_key=page_key,
+                    )
+            if len(text_trans) != len(text):
+                if getattr(pcfg.module, 'pipeline_fault_tolerant', True):
+                    while len(text_trans) < len(text):
+                        text_trans.append('')
+                    text_trans = text_trans[:len(text)]
+                else:
+                    try:
+                        assert len(text_trans) == len(text)
+                    except Exception:
+                        LOGGER.error(
+                            'This translator seems to messed up the translation which resulted in inconsistent translated line count.\n '
+                            'Set concate_text to False or change textblk_break in the source code may solve the problem.'
+                        )
+                        raise
         return text_trans
 
     def on_page_translation_finished(

@@ -13,11 +13,12 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
         exception_type: Specify it to avoid errors dialog of the same type popup repeatedly 
     '''
 
-    # Dialogs may be created later or on another thread, outside the original
-    # except block, so format the traceback retained by the exception itself.
-    detail_traceback = ''.join(traceback.format_exception(
-        type(exception), exception, exception.__traceback__,
-    ))
+    if isinstance(exception, BaseException):
+        detail_traceback = ''.join(traceback.format_exception(
+            type(exception), exception, exception.__traceback__,
+        ))
+    else:
+        detail_traceback = str(exception or '')
     
     if exception_type is None:
         exception_type = ''
@@ -26,6 +27,8 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
     show_exception = exception_type_empty or exception_type not in shared.showed_exception
 
     if show_exception:
+        if not exception_type_empty:
+            shared.showed_exception.add(exception_type)
         if error_msg is None:
             error_msg = str(exception)
         else:
@@ -34,7 +37,7 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
         LOGGER.error(detail_traceback)
 
         if not shared.HEADLESS:
-            shared.create_errdialog_in_mainthread(error_msg, detail_traceback, exception_type)
+            shared.create_errdialog_in_mainthread(str(error_msg), str(detail_traceback), str(exception_type))
 
 
 def create_info_dialog(info_msg, btn_type=None, modal: bool = False, frame_less: bool = False, signal_slot_map_list: List[Dict] = None):

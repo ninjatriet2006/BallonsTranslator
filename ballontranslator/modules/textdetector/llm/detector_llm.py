@@ -874,4 +874,23 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
             )
             mask = cv2.dilate(mask, element)
 
+        if getattr(pcfg.module, 'enable_verify', False) and getattr(pcfg.module, 'verify_detection', True):
+            try:
+                from ballontranslator.modules.textdetector.superior_verifier import run_superior_verify
+                verifier_id = getattr(pcfg.module, 'verifier_llm_id', '')
+                verifier_prof = runtime_profile(pcfg.module.llm_profiles, verifier_id) if verifier_id else None
+                refined_mask, refined_blks = run_superior_verify(
+                    img,
+                    blk_list,
+                    verifier_profile=verifier_prof,
+                    stop_event=self.stop_event,
+                )
+                if refined_blks:
+                    blk_list = refined_blks
+                    if refined_mask is not None and refined_mask.shape == mask.shape:
+                        mask = refined_mask
+            except Exception as e:
+                self.logger.warning(f"[Superior Verify] Detection verification stage failed: {e}. Preserving LLM detection.")
+
         return mask, blk_list
+

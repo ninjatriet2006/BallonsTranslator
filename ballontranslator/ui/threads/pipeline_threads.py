@@ -487,7 +487,8 @@ class OCRThread(ModuleThread):
 
 class TranslateThread(ModuleThread):
 
-    progress_changed = Signal(int)
+    progress_changed = Signal(int, int)
+    error_counter = 0
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__('translator', TRANSLATORS, *args, **kwargs)
@@ -664,6 +665,7 @@ class TranslateThread(ModuleThread):
 
     def initImgtransPipeline(self, proj: ProjImgTrans, stop_event: threading.Event = None):
         super().initImgtransPipeline(proj, stop_event)
+        self.error_counter = 0
         with self._queue_lock:
             self.pipeline_pagekey_queue.clear()
 
@@ -677,6 +679,7 @@ class TranslateThread(ModuleThread):
         self.start()
 
     def _handle_translate_error(self, e: Exception, page_key: str):
+        self.error_counter += 1
         if pcfg.module.pipeline_fault_tolerant:
             LOGGER.warning(f"Translation failed for {page_key}: {e}")
             return
@@ -750,7 +753,7 @@ class TranslateThread(ModuleThread):
                     self.blockSignals(False)
 
                 self.finished_counter += 1
-                self.progress_changed.emit(self.finished_counter)
+                self.progress_changed.emit(self.finished_counter, self.error_counter)
 
                 if not self.pipeline_finished() and delay > 0:
                     stop_event.wait(delay)
@@ -800,26 +803,33 @@ class TranslateThread(ModuleThread):
                         except Exception as e:
                             self._handle_translate_error(e, p_key)
                         self.finished_counter += 1
-                        self.progress_changed.emit(self.finished_counter)
+                        self.progress_changed.emit(self.finished_counter, self.error_counter)
 
 
 class ImgtransThread(QThread):
 
     pipeline_stopped = Signal()
-    update_detect_progress = Signal(int)
-    update_ocr_progress = Signal(int)
-    update_translate_progress = Signal(int)
-    update_inpaint_progress = Signal(int)
+    update_upscale_progress = Signal(int, int)
+    update_detect_progress = Signal(int, int)
+    update_ocr_progress = Signal(int, int)
+    update_translate_progress = Signal(int, int)
+    update_inpaint_progress = Signal(int, int)
     page_stage_finished = Signal(str, int)
 
     finish_blktrans_stage = Signal(str, int)
     finish_blktrans = Signal(int, list)
     unload_modules = Signal(list)
 
+    upscale_counter = 0
+    upscale_error_counter = 0
     detect_counter = 0
+    detect_error_counter = 0
     ocr_counter = 0
+    ocr_error_counter = 0
     translate_counter = 0
+    translate_error_counter = 0
     inpaint_counter = 0
+    inpaint_error_counter = 0
     num_pages = 0
 
     def __init__(self, 
@@ -1097,9 +1107,22 @@ class ImgtransThread(QThread):
                     if mask.sum() > 0:
                         if self.inpaint_thread.inpainter is None:
                             LOGGER.warning('[Inpainter] Inpainter is not available or not loaded. Skipping block inpaint.')
-                        else:
                             try:
                                 inpainted = self.inpaint_thread.inpainter.inpaint(im, mask)
+                                if (
+                                    getattr(pcfg.module, 'enable_verify', False)
+                                    and getattr(pcfg.module, 'verify_inpaint', True)
+                                    and self.inpaint_thread.inpainter is not None
+                                ):
+                                    from ballontranslator.modules.inpaint.inpaint_verifier import run_inpaint_verify_and_refine
+                                    inpainted = run_inpaint_verify_and_refine(
+                                        self.inpaint_thread.inpainter,
+                                        im,
+                                        inpainted,
+                                        mask,
+                                        [blk],
+                                        stop_event=self.stop_event,
+                                    )
                             except LLMUserActionRequiredError as e:
                                 _show_llm_user_action_required_dialog(
                                     e,
@@ -1129,10 +1152,16 @@ class ImgtransThread(QThread):
         self.finish_blktrans.emit(mode, blk_ids)
 
     def _imgtrans_pipeline(self):
+        self.upscale_counter = 0
+        self.upscale_error_counter = 0
         self.detect_counter = 0
+        self.detect_error_counter = 0
         self.ocr_counter = 0
+        self.ocr_error_counter = 0
         self.translate_counter = 0
+        self.translate_error_counter = 0
         self.inpaint_counter = 0
+        self.inpaint_error_counter = 0
         
         # 如果指定了pages_to_process，只处理这些页面
         all_pages = list(self.imgtrans_proj.pages.keys())
@@ -1218,46 +1247,66 @@ class ImgtransThread(QThread):
             page_num = page_idx + 1 if page_idx is not None and page_idx >= 0 else imgname
             img = self.imgtrans_proj.read_img(imgname)
 
-            if upscaler_instance is not None:
-                try:
-                    old_h, old_w = img.shape[:2]
-                    scale_param = cfg_module.get_params('upscaler').get(cfg_module.upscaler, {}).get('scale', 1)
-                    if isinstance(scale_param, dict) and 'value' in scale_param:
-                        scale_val = int(scale_param['value'])
-                    else:
-                        scale_val = int(scale_param)
-                    denoise_val = cfg_module.upscale_denoise
-                    if scale_val <= 1 and not denoise_val:
-                        LOGGER.info(f"[Upscale][{page_num}] Skipped: Scale is 1x and Denoise is Off.")
-                        if hasattr(RunStatus, 'FIN_UPSCALE'):
-                            self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_UPSCALE)
-                    else:
-                        upscaled = upscaler_instance.upscale(img, scale=scale_val, denoise=denoise_val)
-                        if upscaled is not None:
-                            new_h, new_w = upscaled.shape[:2]
-                            img = upscaled
-                            curr_img_path = osp.join(self.imgtrans_proj.directory, imgname)
-                            cv2.imwrite(curr_img_path, upscaled)
-                        if getattr(self.imgtrans_proj, 'current_img', None) == imgname:
-                            self.imgtrans_proj.img_array = upscaled
-                        if old_w > 0 and old_h > 0 and (new_w != old_w or new_h != old_h):
-                            scale_x = new_w / old_w
-                            scale_y = new_h / old_h
-                            if imgname in self.imgtrans_proj.pages:
-                                for blk in self.imgtrans_proj.pages[imgname]:
-                                    blk.xywh = [
-                                        round(blk.xywh[0] * scale_x),
-                                        round(blk.xywh[1] * scale_y),
-                                        round(blk.xywh[2] * scale_x),
-                                        round(blk.xywh[3] * scale_y),
-                                    ]
-                                    if hasattr(blk, 'font_size') and blk.font_size:
-                                        blk.font_size = round(blk.font_size * scale_y)
-                        LOGGER.info(f"[Upscale][{page_num}] Page '{imgname}' upscaled with {cfg_module.upscaler} ({old_w}x{old_h} -> {new_w}x{new_h})")
-                        if hasattr(RunStatus, 'FIN_UPSCALE'):
-                            self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_UPSCALE)
-                except Exception as e:
-                    LOGGER.error(f"[Upscale][{page_num}] Failed to upscale {imgname}: {e}")
+            if cfg_module.enable_upscale and cfg_module.upscaler != 'None':
+                if upscaler_instance is not None:
+                    try:
+                        old_h, old_w = img.shape[:2]
+                        scale_param = cfg_module.get_params('upscaler').get(cfg_module.upscaler, {}).get('scale', 1)
+                        if isinstance(scale_param, dict) and 'value' in scale_param:
+                            scale_val = int(scale_param['value'])
+                        else:
+                            scale_val = int(scale_param)
+                        denoise_val = cfg_module.upscale_denoise
+                        if scale_val <= 1 and not denoise_val:
+                            LOGGER.info(f"[Upscale][{page_num}] Skipped: Scale is 1x and Denoise is Off.")
+                            if hasattr(RunStatus, 'FIN_UPSCALE'):
+                                self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_UPSCALE)
+                        else:
+                            upscaled = upscaler_instance.upscale(img, scale=scale_val, denoise=denoise_val)
+                            if upscaled is not None:
+                                new_h, new_w = upscaled.shape[:2]
+                                img = upscaled
+                                curr_img_path = osp.join(self.imgtrans_proj.directory, imgname)
+                                cv2.imwrite(curr_img_path, upscaled)
+                            if getattr(self.imgtrans_proj, 'current_img', None) == imgname:
+                                self.imgtrans_proj.img_array = upscaled
+                            if old_w > 0 and old_h > 0 and (new_w != old_w or new_h != old_h):
+                                scale_x = new_w / old_w
+                                scale_y = new_h / old_h
+                                if imgname in self.imgtrans_proj.pages:
+                                    for blk in self.imgtrans_proj.pages[imgname]:
+                                        blk.xywh = [
+                                            round(blk.xywh[0] * scale_x),
+                                            round(blk.xywh[1] * scale_y),
+                                            round(blk.xywh[2] * scale_x),
+                                            round(blk.xywh[3] * scale_y),
+                                        ]
+                                        if hasattr(blk, 'font_size') and blk.font_size:
+                                            blk.font_size = round(blk.font_size * scale_y)
+                            LOGGER.info(f"[Upscale][{page_num}] Page '{imgname}' upscaled with {cfg_module.upscaler} ({old_w}x{old_h} -> {new_w}x{new_h})")
+                            if hasattr(RunStatus, 'FIN_UPSCALE'):
+                                self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_UPSCALE)
+                    except Exception as e:
+                        LOGGER.error(f"[Upscale][{page_num}] Failed to upscale {imgname}: {e}")
+                        self.upscale_error_counter += 1
+                        if pcfg.module.pipeline_fault_tolerant:
+                            self.runtime_issues.append(StageIssue(
+                                page_key=imgname,
+                                stage='upscale',
+                                error_type='stage_failed',
+                                message=str(e),
+                                page_index=page_idx if page_idx is not None else -1,
+                            ))
+                        else:
+                            self._stop_on_stage_failure(
+                                e,
+                                self.tr('Upscale Failed.'),
+                                'UpscaleFailed',
+                                imgname,
+                            )
+                            break
+                    self.upscale_counter += 1
+                    self.update_upscale_progress.emit(self.upscale_counter, self.upscale_error_counter)
 
             if cfg_module.enable_upscale and cfg_module.standardize_dimensions and cfg_module.standardize_target_width > 0 and cfg_module.standardize_target_height > 0:
                 tgt_w = cfg_module.standardize_target_width
@@ -1321,16 +1370,20 @@ class ImgtransThread(QThread):
                             page_index=page_idx if page_idx is not None else -1,
                         ))
                         self.detect_counter += 1
-                        self.update_detect_progress.emit(self.detect_counter)
+                        self.detect_error_counter += 1
+                        self.update_detect_progress.emit(self.detect_counter, self.detect_error_counter)
                         if cfg_module.enable_ocr:
                             self.ocr_counter += 1
-                            self.update_ocr_progress.emit(self.ocr_counter)
+                            self.ocr_error_counter += 1
+                            self.update_ocr_progress.emit(self.ocr_counter, self.ocr_error_counter)
                         if cfg_module.enable_translate and not self.parallel_trans:
                             self.translate_counter += 1
-                            self.update_translate_progress.emit(self.translate_counter)
+                            self.translate_error_counter += 1
+                            self.update_translate_progress.emit(self.translate_counter, self.translate_error_counter)
                         if cfg_module.enable_inpaint:
                             self.inpaint_counter += 1
-                            self.update_inpaint_progress.emit(self.inpaint_counter)
+                            self.inpaint_error_counter += 1
+                            self.update_inpaint_progress.emit(self.inpaint_counter, self.inpaint_error_counter)
                         continue
                     else:
                         self._stop_on_stage_failure(
@@ -1354,7 +1407,7 @@ class ImgtransThread(QThread):
                     need_save_mask = False
                     
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_DET)
-                self.update_detect_progress.emit(self.detect_counter)
+                self.update_detect_progress.emit(self.detect_counter, self.detect_error_counter)
                 self.page_stage_finished.emit('detect', page_idx)
                 LOGGER.stop(f"[Stop][Detector][{page_num}] Found {len(blk_list)} text blocks")
 
@@ -1449,7 +1502,8 @@ class ImgtransThread(QThread):
                             page_index=page_idx if page_idx is not None else -1,
                         ))
                         self.ocr_counter += 1
-                        self.update_ocr_progress.emit(self.ocr_counter)
+                        self.ocr_error_counter += 1
+                        self.update_ocr_progress.emit(self.ocr_counter, self.ocr_error_counter)
                     else:
                         self._stop_on_stage_failure(
                             e,
@@ -1459,7 +1513,7 @@ class ImgtransThread(QThread):
                         )
                         break
                 self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_OCR)
-                self.update_ocr_progress.emit(self.ocr_counter)
+                self.update_ocr_progress.emit(self.ocr_counter, self.ocr_error_counter)
                 page_idx = self.imgtrans_proj.pagename2idx(imgname)
                 self.page_stage_finished.emit('ocr', page_idx)
 
@@ -1489,10 +1543,11 @@ class ImgtransThread(QThread):
                                 message=str(e),
                                 page_index=page_idx if page_idx is not None else -1,
                             ))
+                            self.translate_error_counter += 1
                         else:
                             raise e
                     self.translate_counter += 1
-                    self.update_translate_progress.emit(self.translate_counter)
+                    self.update_translate_progress.emit(self.translate_counter, self.translate_error_counter)
 
             if self.isStopRequested():
                 LOGGER.info('Image translation pipeline stopped.')
@@ -1511,6 +1566,20 @@ class ImgtransThread(QThread):
                     if mask is not None or cfg_module.inpainter == LLM_INPAINT_KEY:
                         try:
                             inpainted = self.inpainter.inpaint(img, mask, blk_list)
+                            if (
+                                getattr(pcfg.module, 'enable_verify', False)
+                                and getattr(pcfg.module, 'verify_inpaint', True)
+                                and self.inpainter is not None
+                            ):
+                                from ballontranslator.modules.inpaint.inpaint_verifier import run_inpaint_verify_and_refine
+                                inpainted = run_inpaint_verify_and_refine(
+                                    self.inpainter,
+                                    img,
+                                    inpainted,
+                                    mask,
+                                    blk_list,
+                                    stop_event=self.stop_event,
+                                )
                             self.imgtrans_proj.save_inpainted(imgname, inpainted)
                         except LLMUserActionRequiredError as e:
                             _show_llm_user_action_required_dialog(
@@ -1537,6 +1606,7 @@ class ImgtransThread(QThread):
                                     message=str(e),
                                     page_index=page_idx if page_idx is not None else -1,
                                 ))
+                                self.inpaint_error_counter += 1
                             else:
                                 _create_page_error_dialog(
                                     e,
@@ -1548,7 +1618,7 @@ class ImgtransThread(QThread):
                         
                     self.inpaint_counter += 1
                     self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
-                    self.update_inpaint_progress.emit(self.inpaint_counter)
+                    self.update_inpaint_progress.emit(self.inpaint_counter, self.inpaint_error_counter)
                     self.page_stage_finished.emit('inpaint', page_idx)
                     LOGGER.stop(f"[Stop][Inpainter][{page_num}] Inpainting completed")
             else:
@@ -1581,10 +1651,11 @@ class ImgtransThread(QThread):
                             message=str(e),
                             page_index=page_idx if page_idx is not None else -1,
                         ))
+                        self.translate_error_counter += 1
                     else:
                         raise e
                 self.translate_counter += 1
-                self.update_translate_progress.emit(self.translate_counter)
+                self.update_translate_progress.emit(self.translate_counter, self.translate_error_counter)
 
         if self.parallel_trans and cfg_module.enable_translate and not self.isStopRequested():
             while not self.translate_thread.pipeline_finished() and not self.isStopRequested():
@@ -1596,6 +1667,12 @@ class ImgtransThread(QThread):
             self.translate_counter = self.translate_thread.finished_counter
 
         self._emit_pipeline_stopped_if_ready(imgtrans_running=False)
+
+    def upscale_finished(self) -> bool:
+        if self.imgtrans_proj is None or getattr(self, 'num_pages', 0) == 0:
+            return True
+        upscale_enabled = bool(cfg_module.enable_upscale and cfg_module.upscaler != 'None')
+        return self.upscale_counter == self.num_pages or not upscale_enabled
 
     def detect_finished(self) -> bool:
         if self.imgtrans_proj is None or getattr(self, 'num_pages', 0) == 0:
@@ -1644,6 +1721,8 @@ class ImgtransThread(QThread):
             self.job = None
 
     def recent_finished_index(self, ref_counter: int) -> int:
+        if cfg_module.enable_upscale and cfg_module.upscaler != 'None':
+            ref_counter = min(ref_counter, self.upscale_counter)
         if cfg_module.enable_detect:
             ref_counter = min(ref_counter, self.detect_counter)
         if cfg_module.enable_ocr:
