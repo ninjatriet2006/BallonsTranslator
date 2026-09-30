@@ -403,7 +403,7 @@ def quadrilateral_can_merge_region(a: Quadrilateral, b: Quadrilateral, ratio = 1
             return False
         else:
             return False
-    if True:#not a_aa and not b_aa:
+    if not a_aa and not b_aa:
         if abs(a.angle - b.angle) < 15 * np.pi / 180:
             fs_a = a.font_size
             fs_b = b.font_size

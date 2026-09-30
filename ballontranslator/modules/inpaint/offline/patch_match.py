@@ -8,6 +8,7 @@
 # Distributed under terms of the MIT license.
 
 import ctypes, os
+import os.path as osp
 import sys
 from typing import Optional, Union
 from glob import glob
@@ -53,26 +54,38 @@ elif sys.platform == "darwin":
 else:
     patchmatchlib = 'data/libs/libpatchmatch.so'
 
-PMLIB = ctypes.CDLL(patchmatchlib)
-PMLIB.PM_set_random_seed.argtypes = [ctypes.c_uint]
-PMLIB.PM_set_verbose.argtypes = [ctypes.c_int]
-PMLIB.PM_free_pymat.argtypes = [CMatT]
-PMLIB.PM_inpaint.argtypes = [CMatT, CMatT, ctypes.c_int]
-PMLIB.PM_inpaint.restype = CMatT
-PMLIB.PM_inpaint_regularity.argtypes = [CMatT, CMatT, CMatT, ctypes.c_int, ctypes.c_float]
-PMLIB.PM_inpaint_regularity.restype = CMatT
-PMLIB.PM_inpaint2.argtypes = [CMatT, CMatT, CMatT, ctypes.c_int]
-PMLIB.PM_inpaint2.restype = CMatT
-PMLIB.PM_inpaint2_regularity.argtypes = [CMatT, CMatT, CMatT, CMatT, ctypes.c_int, ctypes.c_float]
-PMLIB.PM_inpaint2_regularity.restype = CMatT
+PMLIB = None
+
+def _get_pmlib():
+    global PMLIB
+    if PMLIB is not None:
+        return PMLIB
+    if not osp.exists(patchmatchlib):
+        raise FileNotFoundError(
+            f'PatchMatch library not found at "{patchmatchlib}". '
+            f'On Linux, please compile data/libs/libpatchmatch.so.'
+        )
+    PMLIB = ctypes.CDLL(patchmatchlib)
+    PMLIB.PM_set_random_seed.argtypes = [ctypes.c_uint]
+    PMLIB.PM_set_verbose.argtypes = [ctypes.c_int]
+    PMLIB.PM_free_pymat.argtypes = [CMatT]
+    PMLIB.PM_inpaint.argtypes = [CMatT, CMatT, ctypes.c_int]
+    PMLIB.PM_inpaint.restype = CMatT
+    PMLIB.PM_inpaint_regularity.argtypes = [CMatT, CMatT, CMatT, ctypes.c_int, ctypes.c_float]
+    PMLIB.PM_inpaint_regularity.restype = CMatT
+    PMLIB.PM_inpaint2.argtypes = [CMatT, CMatT, CMatT, ctypes.c_int]
+    PMLIB.PM_inpaint2.restype = CMatT
+    PMLIB.PM_inpaint2_regularity.argtypes = [CMatT, CMatT, CMatT, CMatT, ctypes.c_int, ctypes.c_float]
+    PMLIB.PM_inpaint2_regularity.restype = CMatT
+    return PMLIB
 
 
 def set_random_seed(seed: int):
-    PMLIB.PM_set_random_seed(ctypes.c_uint(seed))
+    _get_pmlib().PM_set_random_seed(ctypes.c_uint(seed))
 
 
 def set_verbose(verbose: bool):
-    PMLIB.PM_set_verbose(ctypes.c_int(verbose))
+    _get_pmlib().PM_set_verbose(ctypes.c_int(verbose))
 
 
 def inpaint(
@@ -111,14 +124,15 @@ def inpaint(
     else:
         mask = _canonize_mask_array(mask)
 
+    pmlib = _get_pmlib()
     if global_mask is None:
-        ret_pymat = PMLIB.PM_inpaint(np_to_pymat(image), np_to_pymat(mask), ctypes.c_int(patch_size))
+        ret_pymat = pmlib.PM_inpaint(np_to_pymat(image), np_to_pymat(mask), ctypes.c_int(patch_size))
     else:
         global_mask = _canonize_mask_array(global_mask)
-        ret_pymat = PMLIB.PM_inpaint2(np_to_pymat(image), np_to_pymat(mask), np_to_pymat(global_mask), ctypes.c_int(patch_size))
+        ret_pymat = pmlib.PM_inpaint2(np_to_pymat(image), np_to_pymat(mask), np_to_pymat(global_mask), ctypes.c_int(patch_size))
 
     ret_npmat = pymat_to_np(ret_pymat)
-    PMLIB.PM_free_pymat(ret_pymat)
+    pmlib.PM_free_pymat(ret_pymat)
 
     return ret_npmat
 
@@ -146,14 +160,15 @@ def inpaint_regularity(
         mask = _canonize_mask_array(mask)
 
 
+    pmlib = _get_pmlib()
     if global_mask is None:
-        ret_pymat = PMLIB.PM_inpaint_regularity(np_to_pymat(image), np_to_pymat(mask), np_to_pymat(ijmap), ctypes.c_int(patch_size), ctypes.c_float(guide_weight))
+        ret_pymat = pmlib.PM_inpaint_regularity(np_to_pymat(image), np_to_pymat(mask), np_to_pymat(ijmap), ctypes.c_int(patch_size), ctypes.c_float(guide_weight))
     else:
         global_mask = _canonize_mask_array(global_mask)
-        ret_pymat = PMLIB.PM_inpaint2_regularity(np_to_pymat(image), np_to_pymat(mask), np_to_pymat(global_mask), np_to_pymat(ijmap), ctypes.c_int(patch_size), ctypes.c_float(guide_weight))
+        ret_pymat = pmlib.PM_inpaint2_regularity(np_to_pymat(image), np_to_pymat(mask), np_to_pymat(global_mask), np_to_pymat(ijmap), ctypes.c_int(patch_size), ctypes.c_float(guide_weight))
 
     ret_npmat = pymat_to_np(ret_pymat)
-    PMLIB.PM_free_pymat(ret_pymat)
+    pmlib.PM_free_pymat(ret_pymat)
 
     return ret_npmat
 

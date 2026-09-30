@@ -293,15 +293,23 @@ def check_local_file(local_file: str, sha256_precal: str = None, cache_hash: boo
 
     if file_exists and sha256_precal is not None and shared.check_local_file_hash:
         sha256_precal = sha256_precal.lower()
-        if cache_hash and local_file in shared.cache_data and shared.cache_data[local_file].lower() == sha256_precal:
-            pass
+        if cache_hash:
+            if shared.cache_data is None:
+                shared.load_cache()
+            if shared.cache_data is None:
+                shared.cache_data = {}
+            if local_file in shared.cache_data and shared.cache_data[local_file].lower() == sha256_precal:
+                pass
+            else:
+                sha256_calculated = calculate_sha256(local_file).lower()
+                if sha256_calculated != sha256_precal:
+                    valid_hash = False
+                shared.cache_data[local_file] = sha256_calculated
+                shared.CACHE_UPDATED = True
         else:
             sha256_calculated = calculate_sha256(local_file).lower()
             if sha256_calculated != sha256_precal:
                 valid_hash = False
-            if cache_hash:
-                shared.cache_data[local_file] = sha256_calculated
-                shared.CACHE_UPDATED = True
     
     return file_exists, valid_hash, sha256_calculated
 
@@ -454,7 +462,7 @@ def download_and_check_files(url: str,
     # handle archived
     _raise_if_cancelled(cancel_event)
     if _all_valid(save_files, sha256_pre_calculated):
-        return [], None
+        return True
     
     if isinstance(archived_files, str):
         archived_files = [archived_files]

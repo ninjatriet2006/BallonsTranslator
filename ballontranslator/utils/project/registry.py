@@ -275,6 +275,8 @@ class Registry:
                 self._module_dict[name] = module_class
                 continue
             if not force and name in self._module_dict:
+                if self._module_dict[name] is module_class:
+                    continue
                 raise KeyError(f'{name} is already registered '
                                f'in {self.name}')
             self._module_dict[name] = module_class

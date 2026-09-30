@@ -1095,33 +1095,36 @@ class ImgtransThread(QThread):
                     inpaint_mask_array, ballon_mask, bub_dict = maskseg_method(im, mask=tgt_mask[y1: y2, x1: x2])
                     mask = self.post_process_mask(inpaint_mask_array)
                     if mask.sum() > 0:
-                        try:
-                            inpainted = self.inpaint_thread.inpainter.inpaint(im, mask)
-                        except LLMUserActionRequiredError as e:
-                            _show_llm_user_action_required_dialog(
-                                e,
-                                self.tr('Inpainting Failed.'),
-                                'InpaintFailed',
-                                page_key,
-                                self.tr('Page'),
-                            )
-                            self.requestStop()
-                            self.finish_blktrans.emit(mode, blk_ids)
-                            return
-                        except LLMRequestStopped:
-                            LOGGER.info('Inpainting stopped by user.')
-                            self.requestStop()
-                            self.finish_blktrans.emit(mode, blk_ids)
-                            return
-                        rx1, ry1 = max(0, ox1 - x1), max(0, oy1 - y1)
-                        rx2, ry2 = min(x2 - x1, ox2 - x1), min(y2 - y1, oy2 - y1)
-                        if ry2 > ry1 and rx2 > rx1:
-                            blk.region_inpaint_dict = {
-                                'img': im[ry1: ry2, rx1: rx2],
-                                'mask': mask[ry1: ry2, rx1: rx2],
-                                'inpaint_rect': [int(ox1), int(oy1), int(ox2), int(oy2)],
-                                'inpainted': inpainted[ry1: ry2, rx1: rx2]
-                            }
+                        if self.inpaint_thread.inpainter is None:
+                            LOGGER.warning('[Inpainter] Inpainter is not available or not loaded. Skipping block inpaint.')
+                        else:
+                            try:
+                                inpainted = self.inpaint_thread.inpainter.inpaint(im, mask)
+                            except LLMUserActionRequiredError as e:
+                                _show_llm_user_action_required_dialog(
+                                    e,
+                                    self.tr('Inpainting Failed.'),
+                                    'InpaintFailed',
+                                    page_key,
+                                    self.tr('Page'),
+                                )
+                                self.requestStop()
+                                self.finish_blktrans.emit(mode, blk_ids)
+                                return
+                            except LLMRequestStopped:
+                                LOGGER.info('Inpainting stopped by user.')
+                                self.requestStop()
+                                self.finish_blktrans.emit(mode, blk_ids)
+                                return
+                            rx1, ry1 = max(0, ox1 - x1), max(0, oy1 - y1)
+                            rx2, ry2 = min(x2 - x1, ox2 - x1), min(y2 - y1, oy2 - y1)
+                            if ry2 > ry1 and rx2 > rx1:
+                                blk.region_inpaint_dict = {
+                                    'img': im[ry1: ry2, rx1: rx2],
+                                    'mask': mask[ry1: ry2, rx1: rx2],
+                                    'inpaint_rect': [int(ox1), int(oy1), int(ox2), int(oy2)],
+                                    'inpainted': inpainted[ry1: ry2, rx1: rx2]
+                                }
                     self.finish_blktrans_stage.emit('inpaint', int((ii+1) * progress_prod))
         self.finish_blktrans.emit(mode, blk_ids)
 
@@ -1496,55 +1499,58 @@ class ImgtransThread(QThread):
                 break
                         
             if cfg_module.enable_inpaint:
-                LOGGER.start(f"[Start][Inpainter][{page_num}] {self.inpainter.name} cleaning {imgname}")
-                if hasattr(self.inpainter, 'set_stop_event'):
-                    self.inpainter.set_stop_event(self.stop_event)
-                if mask is None:
-                    mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
-                    
-                if mask is not None or cfg_module.inpainter == LLM_INPAINT_KEY:
-                    try:
-                        inpainted = self.inpainter.inpaint(img, mask, blk_list)
-                        self.imgtrans_proj.save_inpainted(imgname, inpainted)
-                    except LLMUserActionRequiredError as e:
-                        _show_llm_user_action_required_dialog(
-                            e,
-                            self.tr('Inpainting Failed.'),
-                            'InpaintFailed',
-                            imgname,
-                            self.tr('Page'),
-                        )
-                        self.requestStop()
-                        break
-                    except LLMRequestStopped:
-                        LOGGER.info('Inpainting stopped by user.')
-                        self.requestStop()
-                        break
-                    except Exception as e:
-                        if pcfg.module.pipeline_fault_tolerant:
-                            LOGGER.warning(f"[Inpainter][{page_num}] Inpainting failed for {imgname}: {e}")
-                            err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
-                            self.runtime_issues.append(StageIssue(
-                                page_key=imgname,
-                                stage='inpaint',
-                                error_type=err_type,
-                                message=str(e),
-                                page_index=page_idx if page_idx is not None else -1,
-                            ))
-                        else:
-                            _create_page_error_dialog(
+                if self.inpainter is None:
+                    LOGGER.warning(f"[Inpainter][{page_num}] Inpainter is not available or not loaded. Skipping.")
+                else:
+                    LOGGER.start(f"[Start][Inpainter][{page_num}] {self.inpainter.name} cleaning {imgname}")
+                    if hasattr(self.inpainter, 'set_stop_event'):
+                        self.inpainter.set_stop_event(self.stop_event)
+                    if mask is None:
+                        mask = self.imgtrans_proj.load_mask_by_imgname(imgname)
+                        
+                    if mask is not None or cfg_module.inpainter == LLM_INPAINT_KEY:
+                        try:
+                            inpainted = self.inpainter.inpaint(img, mask, blk_list)
+                            self.imgtrans_proj.save_inpainted(imgname, inpainted)
+                        except LLMUserActionRequiredError as e:
+                            _show_llm_user_action_required_dialog(
                                 e,
                                 self.tr('Inpainting Failed.'),
                                 'InpaintFailed',
                                 imgname,
                                 self.tr('Page'),
                             )
-                    
-                self.inpaint_counter += 1
-                self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
-                self.update_inpaint_progress.emit(self.inpaint_counter)
-                self.page_stage_finished.emit('inpaint', page_idx)
-                LOGGER.stop(f"[Stop][Inpainter][{page_num}] Inpainting completed")
+                            self.requestStop()
+                            break
+                        except LLMRequestStopped:
+                            LOGGER.info('Inpainting stopped by user.')
+                            self.requestStop()
+                            break
+                        except Exception as e:
+                            if pcfg.module.pipeline_fault_tolerant:
+                                LOGGER.warning(f"[Inpainter][{page_num}] Inpainting failed for {imgname}: {e}")
+                                err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+                                self.runtime_issues.append(StageIssue(
+                                    page_key=imgname,
+                                    stage='inpaint',
+                                    error_type=err_type,
+                                    message=str(e),
+                                    page_index=page_idx if page_idx is not None else -1,
+                                ))
+                            else:
+                                _create_page_error_dialog(
+                                    e,
+                                    self.tr('Inpainting Failed.'),
+                                    'InpaintFailed',
+                                    imgname,
+                                    self.tr('Page'),
+                                )
+                        
+                    self.inpaint_counter += 1
+                    self.imgtrans_proj.update_page_progress(imgname, RunStatus.FIN_INPAINT)
+                    self.update_inpaint_progress.emit(self.inpaint_counter)
+                    self.page_stage_finished.emit('inpaint', page_idx)
+                    LOGGER.stop(f"[Stop][Inpainter][{page_num}] Inpainting completed")
             else:
                 if len(blk_removed) > 0:
                     self.imgtrans_proj.load_mask_by_imgname

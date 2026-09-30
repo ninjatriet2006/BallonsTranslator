@@ -1,9 +1,11 @@
 import sys
+import os.path as osp
 from typing import List, Tuple
 
 import cv2
 import numpy as np
 
+import ballontranslator.utils.project.shared as shared
 from ballontranslator.utils.system.imgproc_utils import resize_keepasp, smart_resize
 
 from ballontranslator.modules.base import DEFAULT_DEVICE, DEVICE_SELECTOR, TORCH_DTYPE_MAP, BF16_SUPPORTED
@@ -64,11 +66,22 @@ class PatchmatchInpainter(InpainterBase):
                 'archived_files': 'windows_patchmatch_libs.7z',
                 'archive_sha256_pre_calculated': 'c991ff61f7cb3efaf8e75d957e62d56ba646083bc25535f913ac65775c16ca65'
         }]
+    else:
+        download_file_list = None
+
+    available = sys.platform in ('win32', 'darwin')
+    availability_error = 'PatchMatch inpainting is only supported on Windows and macOS.'
 
     def __init__(self, **params) -> None:
         super().__init__(**params)
-        from . import patch_match
-        self.inpaint_method = lambda img, mask, *args, **kwargs: patch_match.inpaint(img, mask, patch_size=3)
+        try:
+            from . import patch_match
+            self.inpaint_method = lambda img, mask, *args, **kwargs: patch_match.inpaint(img, mask, patch_size=3)
+        except (OSError, FileNotFoundError) as e:
+            raise RuntimeError(
+                f"Failed to initialize PatchMatch: {e}. "
+                f"On Linux, please compile data/libs/libpatchmatch.so."
+            ) from e
     
     def _inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list: List[TextBlock] = None) -> np.ndarray:
         return self.inpaint_method(img, mask)
@@ -382,7 +395,7 @@ class Flux2Klein(InpainterBase):
         'torch',
         'diffusers>=0.37.1',
         'safetensors',
-        'transformers==4.57.6',
+        'transformers>=4.40.0',
         'gguf>=0.10.0',
         'accelerate>=0.26.0',
         'hf_transfer'

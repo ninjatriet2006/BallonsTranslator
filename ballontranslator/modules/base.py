@@ -291,9 +291,11 @@ class BaseModule:
         return model_deleted
 
     def load_model(self):
-        # TODO: check and download files & inform UIs
         aquire_model_loading_lock()
         try:
+            if getattr(self, 'download_file_list', None):
+                from .prepare_local_files import ensure_module_files
+                ensure_module_files(self)
             self._load_model()
         finally:
             release_model_loading_lock()

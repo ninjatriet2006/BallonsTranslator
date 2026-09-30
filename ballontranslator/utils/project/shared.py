@@ -149,7 +149,7 @@ TORCH_INSTALL_PREFERRED_PROFILE = None
 
 FUZZY_MATCH_IMAGE_NAME = False
 
-cache_data: Dict = None
+cache_data: Dict = {}
 cache_dir: str = osp.join(PROGRAM_PATH, '.btrans_cache')
 cache_path: str = osp.join(PROGRAM_PATH, '.btrans_cache/cache.json')
 CACHE_UPDATED = False
@@ -209,29 +209,32 @@ show_llm_base_url_dialog_in_mainthread = lambda *args, **kwargs: None
 def load_cache():
     global cache_data
     if cache_data is None:
-        if osp.exists(cache_path):
-            try:
-                with open(cache_path, "r", encoding="utf8") as file:
-                    cache_data = json.load(file)
-            except:
-                print(f'cached file {cache_path} is invalid')
+        cache_data = {}
+    if osp.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf8") as file:
+                loaded = json.load(file)
+                if isinstance(loaded, dict):
+                    cache_data.update(loaded)
+        except Exception:
+            print(f'cached file {cache_path} is invalid')
+            if not cache_data:
                 cache_data = {}
-        else:
-            cache_data = {}
+    elif not cache_data:
+        cache_data = {}
 
 def dump_cache():
-    global cache_data
-    if cache_data is None:
+    global cache_data, CACHE_UPDATED
+    if not cache_data:
         return
     
     cache_dir = osp.dirname(cache_path)
     if not osp.exists(cache_dir):
-        os.makedirs(cache_dir)
+        os.makedirs(cache_dir, exist_ok=True)
 
     with open(cache_path, "w", encoding="utf8") as file:
         json.dump(cache_data, file, indent=4)
 
-    global CACHE_UPDATED
     CACHE_UPDATED = False
 
 config_name_to_view_widget = {}

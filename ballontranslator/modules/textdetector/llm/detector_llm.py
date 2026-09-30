@@ -48,8 +48,10 @@ def assemble_detector_system_prompt(
         "Your task is to detect all text clusters in the comic image and transcribe their exact original text.\n\n"
         "Detection Guidelines:\n"
         f"1. {box_guidelines}\n"
-        "2. Detect separate bounding boxes for distinct speech bubbles; do not merge adjacent bubbles.\n"
-        "3. 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding the whole text bubble/cluster, normalized from 0 to 1000.\n"
+        "2. Strict Speech Bubble Isolation: Detect each distinct speech balloon as a completely separate text block. "
+        "NEVER merge two adjacent, diagonal, touching, or overlapping speech bubbles into one block.\n"
+        "3. Tight Text Bounding: 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding ONLY the actual visible text cluster inside the bubble, "
+        "normalized from 0 to 1000. Do NOT include empty outer padding of the white balloon canvas.\n"
         "4. 'lines': optional list of tight child bounding boxes for each individual text line within the block. "
         "Each child line has 'box_2d': [ymin, xmin, ymax, xmax] tightly bounding only that line, and 'text'.\n\n"
         "Transcription Guidelines:\n"
@@ -385,17 +387,29 @@ def slice_block_into_child_lines(
     
     Returns a list of 4x2 numpy arrays representing quadrilateral points for each child line.
     """
-    if num_lines <= 1:
-        pts = np.array([[parent_x1, parent_y1], [parent_x2, parent_y1], [parent_x2, parent_y2], [parent_x1, parent_y2]], dtype=np.float32)
-        pts_sorted, _ = sort_pnts(pts)
-        return [pts_sorted]
-
     pw = max(1, parent_x2 - parent_x1)
     ph = max(1, parent_y2 - parent_y1)
     child_polys = []
 
     # Extract stroke mask on the whole ROI to guide boundary tightening
     roi_mask = extract_stroke_mask(roi) if roi is not None and roi.size > 0 else None
+
+    if num_lines <= 1:
+        if roi_mask is not None and roi_mask.size > 0:
+            stroke_y, stroke_x = np.where(roi_mask > 0)
+            if len(stroke_y) > 10:
+                pad = 3
+                sy1 = max(parent_y1, parent_y1 + int(np.min(stroke_y)) - pad)
+                sy2 = min(parent_y2, parent_y1 + int(np.max(stroke_y)) + 1 + pad)
+                sx1 = max(parent_x1, parent_x1 + int(np.min(stroke_x)) - pad)
+                sx2 = min(parent_x2, parent_x1 + int(np.max(stroke_x)) + 1 + pad)
+                if (sy2 - sy1) >= 4 and (sx2 - sx1) >= 4:
+                    pts = np.array([[sx1, sy1], [sx2, sy1], [sx2, sy2], [sx1, sy2]], dtype=np.float32)
+                    pts_sorted, _ = sort_pnts(pts)
+                    return [pts_sorted]
+        pts = np.array([[parent_x1, parent_y1], [parent_x2, parent_y1], [parent_x2, parent_y2], [parent_x1, parent_y2]], dtype=np.float32)
+        pts_sorted, _ = sort_pnts(pts)
+        return [pts_sorted]
 
     if is_vertical:
         # Vertical text: Japanese/Chinese manga lines read right-to-left
@@ -495,6 +509,26 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
             'value': 3,
             'display_name': 'Mask Dilate Size',
             'description': 'Base pixel dilation applied to the inpainting mask (scales adaptively with resolution).',
+        },
+        'font size multiplier': {
+            'value': 1.0,
+            'display_name': 'Font Size Multiplier',
+            'description': 'Multiplier applied to the detected font size.',
+        },
+        'font size max': {
+            'value': -1,
+            'display_name': 'Font Size Max (set to -1 to disable)',
+            'description': 'Maximum font size limit for detected blocks.',
+        },
+        'font size min': {
+            'value': -1,
+            'display_name': 'Font Size Min (set to -1 to disable)',
+            'description': 'Minimum font size limit for detected blocks.',
+        },
+        'font size auto clamp': {
+            'value': True,
+            'display_name': 'Font Size Safe Clamp',
+            'description': 'Automatically prevent oversized fonts on single-line or huge bounding boxes.',
         },
         'proxy': {
             'value': '',
@@ -761,6 +795,27 @@ class LLMDetector(LLMChatRequester, TextDetectorBase):
             blk_list.append(blk)
 
         blk_list = sort_regions(blk_list)
+
+        fnt_rsz = float(self.get_param_value('font size multiplier'))
+        fnt_max = float(self.get_param_value('font size max'))
+        fnt_min = float(self.get_param_value('font size min'))
+        auto_clamp = bool(self.get_param_value('font size auto clamp'))
+
+        for blk in blk_list:
+            sz = blk.font_size * fnt_rsz
+            if auto_clamp:
+                # Safe maximum font size relative to comic page height
+                safe_ceiling = max(24.0, min(im_h * 0.045, 64.0))
+                if sz > safe_ceiling:
+                    char_count = sum(len(t) for t in blk.text)
+                    if char_count > 2 or sz > safe_ceiling * 1.5:
+                        sz = min(sz, safe_ceiling)
+            if fnt_max > 0:
+                sz = min(fnt_max, sz)
+            if fnt_min > 0:
+                sz = max(fnt_min, sz)
+            blk.font_size = sz
+            blk._detected_font_size = sz
 
         mask = np.zeros((im_h, im_w), dtype=np.uint8)
         mask_mode = self.get_param_value('mask mode')

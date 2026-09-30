@@ -2115,6 +2115,11 @@ class MainWindow(mainwindow_cls):
                         blk.font_size = gf.font_size
                     elif blk._detected_font_size > 0 and not enable_detect:
                         blk.font_size = blk._detected_font_size
+
+                    # Safe clamp to prevent abnormally huge fonts from overflowing comic page
+                    if blk.font_size > 72:
+                        blk.font_size = min(float(blk.font_size), 72.0)
+                    blk.fontformat.font_size = blk.font_size
                     if override_fnt_stroke:
                         global_stroke = primary_stroke(gf.text_effects)
                         width = (

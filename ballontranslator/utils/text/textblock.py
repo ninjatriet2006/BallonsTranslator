@@ -853,6 +853,14 @@ def try_merge_textline(blk: TextBlock, blk2: TextBlock, fntsize_tol=1.7, distanc
                 return False
             if abs(distance_y) / min(h1, h2) < 0.4:
                 return False
+            # Prevent accidental merging of separate diagonal speech bubbles in vertical text
+            overlap_y = max(0, min(xyxy1[3], xyxy2[3]) - max(xyxy1[1], xyxy2[1]))
+            if overlap_y / max(1.0, min(h1, h2)) < 0.35:
+                return False
+            cy1 = (xyxy1[1] + xyxy1[3]) / 2.0
+            cy2 = (xyxy2[1] + xyxy2[3]) / 2.0
+            if abs(cy1 - cy2) > max(h1, h2) * 0.65:
+                return False
         else:
             if distance_x > 0:
                 return False
@@ -862,6 +870,14 @@ def try_merge_textline(blk: TextBlock, blk2: TextBlock, fntsize_tol=1.7, distanc
             if distance_y > fntsz_avg * fntsz_thr:
                 return False
             if abs(distance_x) / min(w1, w2) < 0.3:
+                return False
+            # Prevent accidental merging of separate diagonal speech bubbles in horizontal text
+            overlap_x = max(0, min(xyxy1[2], xyxy2[2]) - max(xyxy1[0], xyxy2[0]))
+            if overlap_x / max(1.0, min(w1, w2)) < 0.35:
+                return False
+            cx1 = (xyxy1[0] + xyxy1[2]) / 2.0
+            cx2 = (xyxy2[0] + xyxy2[2]) / 2.0
+            if abs(cx1 - cx2) > max(w1, w2) * 0.65:
                 return False
         if fntsize_div > fntsize_tol or 1 / fntsize_div > fntsize_tol:
             return False

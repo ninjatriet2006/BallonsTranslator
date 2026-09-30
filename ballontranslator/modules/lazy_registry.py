@@ -525,9 +525,9 @@ def _collect_class_attrs(class_node: ast.ClassDef, env: Dict[str, Any]) -> Dict[
                 value = evaluator.eval(value_node)
                 if value is not UNKNOWN:
                     class_env[name] = value
-                    if name in {'params', 'download_file_list', 'download_file_on_load', 'dependencies'}:
+                    if name in {'params', 'download_file_list', 'download_file_on_load', 'dependencies', 'available', 'availability_error'}:
                         attrs[name] = value
-                elif name in {'params', 'download_file_list', 'download_file_on_load', 'dependencies'}:
+                elif name in {'params', 'download_file_list', 'download_file_on_load', 'dependencies', 'available', 'availability_error'}:
                     warnings.append(f'{class_node.name}.{name} could not be evaluated lazily')
             elif isinstance(node, ast.If):
                 cond = evaluator.eval(node.test)
@@ -816,6 +816,8 @@ def _scan_file(path: str, module_type: str, include_inactive_platform_branches: 
                     dependencies=deepcopy(attrs.get('dependencies', [])),
                     supported_src_list=src,
                     supported_tgt_list=tgt,
+                    available=attrs.get('available', True),
+                    availability_error=attrs.get('availability_error', ''),
                     metadata_warnings=metadata_warnings,
                 ))
             elif isinstance(node, ast.If):
