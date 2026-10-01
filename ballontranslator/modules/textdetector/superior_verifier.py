@@ -14,10 +14,12 @@ import cv2
 import numpy as np
 
 from ballontranslator.modules.textdetector.base import TEXTDETECTORS, TextBlock
-from ballontranslator.modules.textdetector.llm.detector_llm import (
+from ballontranslator.modules.textdetector.mask_utils import (
     extract_stroke_mask,
     is_flat_background,
     slice_block_into_child_lines,
+    compute_box_iou,
+    compute_box_iom,
 )
 from ballontranslator.utils.project.config import pcfg
 from ballontranslator.utils.project.llm_profiles import LLMProfile, runtime_profile
@@ -26,50 +28,6 @@ from ballontranslator.utils.text.textblock import examine_textblk, sort_pnts, so
 LOGGER = logging.getLogger(__name__)
 
 
-def compute_box_iou(
-    box1: Sequence[float],
-    box2: Sequence[float],
-) -> float:
-    """Compute Intersection over Union (IoU) of two [x1, y1, x2, y2] bounding boxes."""
-    x1 = max(float(box1[0]), float(box2[0]))
-    y1 = max(float(box1[1]), float(box2[1]))
-    x2 = min(float(box1[2]), float(box2[2]))
-    y2 = min(float(box1[3]), float(box2[3]))
-
-    inter_w = max(0.0, x2 - x1)
-    inter_h = max(0.0, y2 - y1)
-    inter_area = inter_w * inter_h
-
-    area1 = max(0.0, float(box1[2]) - float(box1[0])) * max(0.0, float(box1[3]) - float(box1[1]))
-    area2 = max(0.0, float(box2[2]) - float(box2[0])) * max(0.0, float(box2[3]) - float(box2[1]))
-
-    union_area = area1 + area2 - inter_area
-    if union_area <= 0.0:
-        return 0.0
-    return inter_area / union_area
-
-
-def compute_box_iom(
-    box1: Sequence[float],
-    box2: Sequence[float],
-) -> float:
-    """Compute Intersection over Minimum area (IoM) of two [x1, y1, x2, y2] bounding boxes."""
-    x1 = max(float(box1[0]), float(box2[0]))
-    y1 = max(float(box1[1]), float(box2[1]))
-    x2 = min(float(box1[2]), float(box2[2]))
-    y2 = min(float(box1[3]), float(box2[3]))
-
-    inter_w = max(0.0, x2 - x1)
-    inter_h = max(0.0, y2 - y1)
-    inter_area = inter_w * inter_h
-
-    area1 = max(0.0, float(box1[2]) - float(box1[0])) * max(0.0, float(box1[3]) - float(box1[1]))
-    area2 = max(0.0, float(box2[2]) - float(box2[0])) * max(0.0, float(box2[3]) - float(box2[1]))
-    min_area = min(area1, area2)
-
-    if min_area <= 0.0:
-        return 0.0
-    return inter_area / min_area
 
 
 def match_boxes(

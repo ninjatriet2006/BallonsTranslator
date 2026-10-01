@@ -416,7 +416,7 @@ class LLMOCR(LLMChatRequester, OCRBase):
             data = json.loads(raw_response.strip(), strict=False)
         except (TypeError, ValueError):
             try:
-                from ballontranslator.modules.textdetector.llm.detector_llm import _clean_json_text, _repair_json_text
+                from ballontranslator.modules.llm_chat import _clean_json_text, _repair_json_text
                 repaired = _repair_json_text(_clean_json_text(raw_response.strip()))
                 data = json.loads(repaired, strict=False)
             except (TypeError, ValueError) as error:

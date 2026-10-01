@@ -434,3 +434,90 @@ class LLMChatRequester:
                 str(profile.thinking_level or THINKING_AUTO),
             )
         return result
+
+
+def _repair_json_text(text: str) -> str:
+    """Auto-repair broken JSON by balancing unclosed braces/brackets, stripping trailing commas, and closing unclosed strings."""
+    if not text:
+        return text
+
+    # Remove trailing commas before closing brackets
+    repaired = re.sub(r',\s*([\]}])', r'\1', text)
+    repaired = re.sub(r',\s*$', '', repaired.rstrip())
+
+    stack = []
+    in_string = False
+    escape = False
+
+    for ch in repaired:
+        if escape:
+            escape = False
+            continue
+        if ch == '\\':
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if not in_string:
+            if ch in '{[':
+                stack.append('}' if ch == '{' else ']')
+            elif ch in '}]':
+                if stack and stack[-1] == ch:
+                    stack.pop()
+
+    if in_string:
+        repaired += '"'
+
+    repaired = re.sub(r',\s*$', '', repaired.rstrip())
+
+    if stack:
+        repaired += ''.join(reversed(stack))
+
+    repaired = re.sub(r',\s*([\]}])', r'\1', repaired)
+    return repaired
+
+
+def _clean_json_text(raw_text: str) -> str:
+    """Extract and clean valid JSON substring from LLM response."""
+    text = raw_text.strip()
+    fence_match = re.search(r"```(?:json)?\s*([{\[].*?[}\]])\s*```", text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1).strip()
+    else:
+        if text.startswith('```'):
+            lines = text.splitlines()
+            if lines and lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].startswith('```'):
+                lines = lines[:-1]
+            text = '\n'.join(lines).strip()
+
+        first_brace = text.find('{')
+        first_bracket = text.find('[')
+        start_idx = -1
+        if first_brace != -1 and first_bracket != -1:
+            start_idx = min(first_brace, first_bracket)
+        elif first_brace != -1:
+            start_idx = first_brace
+        elif first_bracket != -1:
+            start_idx = first_bracket
+
+        if start_idx != -1:
+            text = text[start_idx:]
+
+        last_brace = text.rfind('}')
+        last_bracket = text.rfind(']')
+        end_idx = -1
+        if last_brace != -1 and last_bracket != -1:
+            end_idx = max(last_brace, last_bracket)
+        elif last_brace != -1:
+            end_idx = last_brace
+        elif last_bracket != -1:
+            end_idx = last_bracket
+
+        if end_idx != -1:
+            text = text[:end_idx + 1]
+
+    return text
+
