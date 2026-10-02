@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import numpy as np
 
 from ballontranslator.utils.system.imgproc_utils import rotate_image
@@ -382,6 +382,175 @@ def balance_lines(lines: List[Line], delimiter: str = ' ') -> List[Line]:
     return lines
 
 
+def layout_text_content_driven(
+    words: List[str],
+    wl_list: List[int],
+    delimiter: str,
+    delimiter_len: int,
+    line_height: int,
+    bounding_rect: List[int],
+    img_w: Optional[int] = None,
+    img_h: Optional[int] = None,
+    src_is_vertical: bool = False,
+    scale_factor_range: Tuple[float, float] = (1.5, 2.0),
+) -> Tuple[str, List[int]]:
+    """Content-driven text layout and bounding box calculation.
+
+    1. Measures the longest word and consecutive word pairs to guarantee words are never cut.
+    2. Limits box expansion to 50% - 100% of reference base dimensions (safe envelope).
+    3. Wraps lines sequentially from top to bottom (preventing top/bottom fragmentation).
+    4. Calculates required height dynamically from line count.
+    5. Re-centers box on original centroid and clamps strictly within image boundaries.
+    """
+    if not words or not wl_list:
+        return '', list(bounding_rect) if bounding_rect is not None else [0, 0, 0, 0]
+
+    max_single_w = max(wl_list) if wl_list else 0
+    if len(words) >= 2:
+        max_pair_w = max(
+            wl_list[i] + delimiter_len + wl_list[i + 1]
+            for i in range(len(words) - 1)
+        )
+    else:
+        max_pair_w = max_single_w
+
+    total_text_w = sum(wl_list) + max(0, len(words) - 1) * delimiter_len
+    orig_x, orig_y, orig_w, orig_h = bounding_rect
+    center_x = orig_x + orig_w / 2.0
+    center_y = orig_y + orig_h / 2.0
+
+    if src_is_vertical:
+        # In vertical manga text, the height reflects bubble scale, while width was narrow.
+        base_ref_w = max(float(orig_w), float(orig_h) * 0.65)
+    else:
+        base_ref_w = float(orig_w)
+
+    min_allowed_w = max_single_w + 10.0
+    max_allowed_w = max(base_ref_w * scale_factor_range[1], min_allowed_w + 20.0)
+
+    if total_text_w <= max_allowed_w and len(words) <= 3:
+        target_w = total_text_w + 8.0
+    else:
+        k_lines = max(2, int(np.ceil(total_text_w / max_allowed_w)))
+        candidate_w = total_text_w / float(k_lines)
+        target_w = max(candidate_w, max_pair_w + 6.0)
+        target_w = float(np.clip(target_w, min_allowed_w, max_allowed_w))
+
+    wrapped_lines = []
+    curr_words = []
+    curr_w = 0
+    for w, wl in zip(words, wl_list):
+        sp_w = delimiter_len if curr_words else 0
+        if curr_words and (curr_w + sp_w + wl > target_w):
+            wrapped_lines.append(delimiter.join(curr_words))
+            curr_words = [w]
+            curr_w = wl
+        else:
+            curr_words.append(w)
+            curr_w += sp_w + wl
+    if curr_words:
+        wrapped_lines.append(delimiter.join(curr_words))
+
+    # Balance orphan line if needed
+    if len(wrapped_lines) >= 2 and delimiter == ' ':
+        last_w = [w for w in wrapped_lines[-1].split(' ') if w]
+        prev_w = [w for w in wrapped_lines[-2].split(' ') if w]
+        if len(last_w) == 1 and len(prev_w) >= 3:
+            last_w.insert(0, prev_w.pop())
+            wrapped_lines[-2] = ' '.join(prev_w)
+            wrapped_lines[-1] = ' '.join(last_w)
+
+    # Compute actual max line width
+    line_widths = []
+    for l_str in wrapped_lines:
+        lw = sum(wl_list[words.index(w)] for w in l_str.split(delimiter) if w in words)
+        lw += max(0, len(l_str.split(delimiter)) - 1) * delimiter_len
+        line_widths.append(lw)
+    actual_max_w = max(line_widths) if line_widths else target_w
+
+    pad_x = 8
+    pad_y = 6
+    box_w = int(round(actual_max_w + pad_x * 2))
+    box_h = int(round(len(wrapped_lines) * line_height + pad_y * 2))
+
+    new_x = int(round(center_x - box_w / 2.0))
+    new_y = int(round(center_y - box_h / 2.0))
+
+    if img_w is not None and img_w > 0:
+        if new_x < 0:
+            new_x = 0
+        elif new_x + box_w > img_w:
+            new_x = max(0, img_w - box_w)
+        box_w = min(box_w, img_w)
+    if img_h is not None and img_h > 0:
+        if new_y < 0:
+            new_y = 0
+        elif new_y + box_h > img_h:
+            new_y = max(0, img_h - box_h)
+        box_h = min(box_h, img_h)
+
+    return '\n'.join(wrapped_lines), [new_x, new_y, box_w, box_h]
+
+
+def resolve_box_collisions(
+    rects: List[List[int]],
+    min_gap: int = 8,
+    img_w: Optional[int] = None,
+    img_h: Optional[int] = None,
+    max_passes: int = 6,
+) -> List[List[int]]:
+    """Resolve overlaps between bounding boxes by separating them along the axis of minimum overlap."""
+    if len(rects) <= 1:
+        return rects
+    rects = [list(r) for r in rects]
+    for _ in range(max_passes):
+        collision_found = False
+        for i in range(len(rects)):
+            for j in range(i + 1, len(rects)):
+                x1_a, y1_a, w_a, h_a = rects[i]
+                x1_b, y1_b, w_b, h_b = rects[j]
+                x2_a, y2_a = x1_a + w_a, y1_a + h_a
+                x2_b, y2_b = x1_b + w_b, y1_b + h_b
+
+                overlap_x = min(x2_a, x2_b) - max(x1_a, x1_b)
+                overlap_y = min(y2_a, y2_b) - max(y1_a, y1_b)
+
+                if overlap_x > -min_gap and overlap_y > -min_gap:
+                    collision_found = True
+                    # Separate along the axis of smaller overlap
+                    if overlap_y <= overlap_x:
+                        shift = int(np.ceil((overlap_y + min_gap) / 2.0))
+                        if y1_a <= y1_b:
+                            rects[i][1] -= shift
+                            rects[j][1] += shift
+                        else:
+                            rects[i][1] += shift
+                            rects[j][1] -= shift
+                    else:
+                        shift = int(np.ceil((overlap_x + min_gap) / 2.0))
+                        if x1_a <= x1_b:
+                            rects[i][0] -= shift
+                            rects[j][0] += shift
+                        else:
+                            rects[i][0] += shift
+                            rects[j][0] -= shift
+
+                    for k in (i, j):
+                        if img_w is not None and img_w > 0:
+                            if rects[k][0] < 0:
+                                rects[k][0] = 0
+                            elif rects[k][0] + rects[k][2] > img_w:
+                                rects[k][0] = max(0, img_w - rects[k][2])
+                        if img_h is not None and img_h > 0:
+                            if rects[k][1] < 0:
+                                rects[k][1] = 0
+                            elif rects[k][1] + rects[k][3] > img_h:
+                                rects[k][1] = max(0, img_h - rects[k][3])
+        if not collision_found:
+            break
+    return rects
+
+
 def layout_text(
     blk: TextBlock,
     mask: np.ndarray, 
@@ -396,8 +565,25 @@ def layout_text(
     max_central_width=np.inf,
     src_is_cjk=False,
     tgt_is_cjk=False,
-    ref_src_lines = False
+    ref_src_lines = False,
+    bounding_rect: Optional[List[int]] = None,
+    img_w: Optional[int] = None,
+    img_h: Optional[int] = None,
 ) -> Tuple[str, List]:
+
+    if not tgt_is_cjk and not getattr(blk, 'vertical', False) and bounding_rect is not None:
+        concated_text, xywh = layout_text_content_driven(
+            words=words,
+            wl_list=wl_list,
+            delimiter=delimiter,
+            delimiter_len=delimiter_len,
+            line_height=line_height,
+            bounding_rect=bounding_rect,
+            img_w=img_w,
+            img_h=img_h,
+            src_is_vertical=bool(getattr(blk, 'src_is_vertical', False)),
+        )
+        return concated_text, xywh, False, 0
 
     angle = blk.angle
     alignment = blk.alignment

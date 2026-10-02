@@ -40,7 +40,7 @@ from ballontranslator.utils.system.logger import logger as LOGGER
 from ballontranslator.utils.project import shared
 from ballontranslator.utils.system.imgproc_utils import extract_ballon_region, get_block_mask
 from ballontranslator.utils.text.text_processing import seg_text, is_cjk
-from ballontranslator.utils.text.text_layout import layout_text
+from ballontranslator.utils.text.text_layout import layout_text, resolve_box_collisions
 
 
 def build_path_reorder_map(
@@ -524,6 +524,7 @@ class SceneTextManager(QObject):
                 textblock.font_family = self.formatpanel.familybox.currentText()
             self.addTextBlock(textblock)
         if self.auto_textlayout_flag:
+            self.resolve_textitem_collisions()
             self.updateTextBlkList()
 
     def updateSceneTextitems(
@@ -910,6 +911,7 @@ class SceneTextManager(QObject):
                 old_rect_lst.append(blkitem.absBoundingRect(qrect=True))
                 trans_widget_lst.append(self.pairwidget_list[blkitem.idx].e_trans)
                 self.layout_textblk(blkitem)
+            self.resolve_textitem_collisions()
 
             self.canvas.push_undo_command(AutoLayoutCommand(selected_blks, old_rect_lst, old_html_lst, trans_widget_lst))
 
@@ -1098,7 +1100,10 @@ class SceneTextManager(QObject):
             max_central_width,
             src_is_cjk=src_is_cjk,
             tgt_is_cjk=tgt_is_cjk,
-            ref_src_lines=ref_src_lines
+            ref_src_lines=ref_src_lines,
+            bounding_rect=bounding_rect,
+            img_w=im_w,
+            img_h=im_h,
         )
 
         # font size post adjustment
@@ -1134,14 +1139,34 @@ class SceneTextManager(QObject):
         
         ffmt = QFontMetricsF(blk_font)
         maxw = max([ffmt.horizontalAdvance(t) for t in new_text.split('\n')])
-        blkitem.set_size(maxw * 1.5, xywh[3], set_layout_maxsize=True)
+        target_box_w = max(int(round(maxw * 1.15)), int(xywh[2]))
+        blkitem.set_size(target_box_w, xywh[3], set_layout_maxsize=True)
         blkitem.setPlainText(new_text)
         if update_widgets and len(self.pairwidget_list) > blkitem.idx:
             self.pairwidget_list[blkitem.idx].e_trans.setPlainText(new_text)
         if restore_charfmts:
             self.restore_charfmts(blkitem, text, new_text, char_fmts)
+        blkitem.setRect([xywh[0], xywh[1], target_box_w, xywh[3]])
         blkitem.squeezeBoundingRect()
         return True
+
+    def resolve_textitem_collisions(self, min_gap: int = 8) -> None:
+        """Ensure rendered text boxes on the current page do not overlap or touch."""
+        if len(self.textblk_item_list) <= 1:
+            return
+        img = getattr(self.imgtrans_proj, 'img_array', None)
+        im_h, im_w = img.shape[:2] if img is not None else (None, None)
+
+        rects = []
+        for item in self.textblk_item_list:
+            br = item.absBoundingRect(qrect=True)
+            rects.append([int(round(br.x())), int(round(br.y())), int(round(br.width())), int(round(br.height()))])
+
+        resolved = resolve_box_collisions(rects, min_gap=min_gap, img_w=im_w, img_h=im_h)
+        for item, (rx, ry, rw, rh) in zip(self.textblk_item_list, resolved):
+            curr = item.absBoundingRect(qrect=True)
+            if int(round(curr.x())) != rx or int(round(curr.y())) != ry:
+                item.setRect([rx, ry, int(round(curr.width())), int(round(curr.height()))])
     
     def restore_charfmts(self, blkitem: TextBlkItem, text: str, new_text: str, char_fmts: List[QTextCharFormat]):
         cursor = blkitem.textCursor()

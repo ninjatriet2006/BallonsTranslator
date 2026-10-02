@@ -14,6 +14,7 @@ from qtpy.QtGui import QContextMenuEvent, QTextCursor, QGuiApplication, QIcon, Q
 from ballontranslator.utils.system.logger import logger as LOGGER
 from ballontranslator.utils.text.text_processing import is_cjk
 from ballontranslator.utils.text.textblock import TextBlock, TextAlignment
+from ballontranslator.utils.text.text_layout import resolve_box_collisions
 from ballontranslator.utils.text.text_effects import (
     SolidPaint,
     effect_paint_fallback_color,
@@ -1694,6 +1695,17 @@ class MainWindow(mainwindow_cls):
                 scene.addItem(blk_item)
                 text_items.append(blk_item)
 
+            if len(text_items) > 1:
+                rects = []
+                for item in text_items:
+                    br = item.absBoundingRect(qrect=True)
+                    rects.append([int(round(br.x())), int(round(br.y())), int(round(br.width())), int(round(br.height()))])
+                resolved = resolve_box_collisions(rects, min_gap=8, img_w=w, img_h=h)
+                for item, (rx, ry, rw, rh) in zip(text_items, resolved):
+                    curr = item.absBoundingRect(qrect=True)
+                    if int(round(curr.x())) != rx or int(round(curr.y())) != ry:
+                        item.setRect([rx, ry, rw, rh])
+
             painter = QPainter(result)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             rect = QRectF(0, 0, w, h)
@@ -2212,6 +2224,8 @@ class MainWindow(mainwindow_cls):
             if not enable_detect and enable_translate:
                 for blkitem in self.st_manager.textblk_item_list:
                     blkitem.squeezeBoundingRect()
+
+            self.st_manager.resolve_textitem_collisions()
 
             if page_index + 1 == self.imgtrans_proj.num_pages:
                 self.st_manager.auto_textlayout_flag = False
