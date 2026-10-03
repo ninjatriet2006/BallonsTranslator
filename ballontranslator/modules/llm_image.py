@@ -332,7 +332,8 @@ class LLMImageRequester:
 
     @staticmethod
     def _api_key_for_profile(profile: LLMProfile) -> str:
-        api_key = resolve_api_key(profile).strip()
+        from ballontranslator.utils.project.key_pool import resolve_active_api_key
+        api_key = resolve_active_api_key(profile).strip()
         if profile.require_api_key and not api_key:
             raise LLMApiKeyRequiredError(profile.id, profile.name)
         return api_key

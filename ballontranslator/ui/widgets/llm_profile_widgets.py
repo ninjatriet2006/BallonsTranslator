@@ -1,11 +1,13 @@
 import copy
 import json
+import os
 import uuid
 from typing import Dict, List, Optional, get_type_hints
 
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
+    QFileDialog,
     QMessageBox,
     QPlainTextEdit,
     QGridLayout,
@@ -550,11 +552,21 @@ class ProfileCardWidget(QGroupBox):
         self.api_label.setToolTip(self.api_key_widget.editor.toolTip())
         self.api_key_widget.setText(resolve_api_key(profile))
         self._api_key_editor_is_empty = self._apiKeyEditorIsEmpty()
+        self._sync_api_key_echo_mode()
+
+        self.api_key_browse_btn = QToolButton(self)
+        self.api_key_browse_btn.setObjectName('LLMProfileApiKeyBrowseBtn')
+        self.api_key_browse_btn.setIcon(QIcon(themed_icon_path('files.svg')))
+        self.api_key_browse_btn.setFixedSize(16, 16)
+        self.api_key_browse_btn.setToolTip(self.tr('Browse LLM Keys File (.txt, .json)'))
+        self.api_key_browse_btn.clicked.connect(self._on_browse_api_keys_file)
+
         api_editor_row = QHBoxLayout()
         api_editor_row.setContentsMargins(0, 0, 0, 0)
         api_editor_row.setSpacing(4)
         api_editor_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         api_editor_row.addWidget(self.api_key_widget, 0, Qt.AlignmentFlag.AlignLeft)
+        api_editor_row.addWidget(self.api_key_browse_btn, 0, Qt.AlignmentFlag.AlignLeft)
         api_editor_row.addWidget(self.key_status_icon, 0, Qt.AlignmentFlag.AlignLeft)
         api_editor_row.addStretch(1)
 
@@ -1598,17 +1610,49 @@ class ProfileCardWidget(QGroupBox):
 
     def on_api_key_finished(self):
         store_api_key(self.profile, self.api_key_widget.text())
+        self._sync_api_key_echo_mode()
+        self.refreshKeyStatus()
         self.profile_changed.emit()
 
     def _apiKeyEditorIsEmpty(self) -> bool:
         return not self.api_key_widget.text().strip()
 
     def on_api_key_text_changed(self, *_):
+        self._sync_api_key_echo_mode()
         is_empty = self._apiKeyEditorIsEmpty()
-        if is_empty == self._api_key_editor_is_empty:
-            return
-        self._api_key_editor_is_empty = is_empty
+        if is_empty != self._api_key_editor_is_empty:
+            self._api_key_editor_is_empty = is_empty
         self.refreshKeyStatus()
+
+    def _sync_api_key_echo_mode(self):
+        text = self.api_key_widget.text().strip()
+        from ballontranslator.utils.project.key_pool import is_key_file
+        if is_key_file(text):
+            self.api_key_widget.editor.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self.api_key_widget.editor.setEchoMode(QLineEdit.EchoMode.Password)
+
+    def _on_browse_api_keys_file(self):
+        curr_text = self.api_key_widget.text().strip()
+        from ballontranslator.utils.project.key_pool import is_key_file, clean_key_file_path
+        start_dir = ""
+        if is_key_file(curr_text):
+            cleaned = clean_key_file_path(curr_text)
+            if os.path.exists(cleaned):
+                start_dir = os.path.dirname(cleaned) if os.path.isfile(cleaned) else cleaned
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Select LLM Keys File"),
+            start_dir,
+            self.tr("Keys Files (*.txt *.json);;All Files (*)"),
+        )
+        if path:
+            self.api_key_widget.setText(path)
+            store_api_key(self.profile, path)
+            self._sync_api_key_echo_mode()
+            self.refreshKeyStatus()
+            self.profile_changed.emit()
 
     def on_detail_edited(self, param_key, param_content):
         content = param_content.get('content')
@@ -1755,13 +1799,30 @@ class ProfileCardWidget(QGroupBox):
     def refreshKeyStatus(self):
         require_key = bool(self.profile.require_api_key)
         self.key_status_icon.setVisible(require_key)
+        if hasattr(self, 'api_key_browse_btn'):
+            self.api_key_browse_btn.setVisible(require_key)
+        self._sync_api_key_echo_mode()
         if not require_key:
             return
         has_key = not self._apiKeyEditorIsEmpty()
         if has_key:
-            self.key_status_icon.setIconFile('llm_key_ok.svg')
-            self.key_status_icon.setProperty('status', 'ok')
-            self.key_status_icon.setToolTip(self.tr('Required API key is configured.'))
+            text = self.api_key_widget.text().strip()
+            from ballontranslator.utils.project.key_pool import is_key_file, count_profile_keys, clean_key_file_path
+            if is_key_file(text):
+                count = count_profile_keys(self.profile)
+                cleaned_path = clean_key_file_path(text)
+                if count > 0:
+                    self.key_status_icon.setIconFile('llm_key_ok.svg')
+                    self.key_status_icon.setProperty('status', 'ok')
+                    self.key_status_icon.setToolTip(self.tr(f'Keys file configured ({count} keys loaded):\n{cleaned_path}'))
+                else:
+                    self.key_status_icon.setIconFile('llm_key_missing.svg')
+                    self.key_status_icon.setProperty('status', 'missing')
+                    self.key_status_icon.setToolTip(self.tr(f'Keys file not found or contains no valid keys:\n{cleaned_path}'))
+            else:
+                self.key_status_icon.setIconFile('llm_key_ok.svg')
+                self.key_status_icon.setProperty('status', 'ok')
+                self.key_status_icon.setToolTip(self.tr('Required API key is configured.'))
         else:
             self.key_status_icon.setIconFile('llm_key_missing.svg')
             self.key_status_icon.setProperty('status', 'missing')

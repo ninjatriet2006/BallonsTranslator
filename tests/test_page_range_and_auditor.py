@@ -202,7 +202,7 @@ class PageRangeAndAuditorTests(unittest.TestCase):
 
     def test_llm_action_required_dialogs_compatibility(self):
         from unittest.mock import MagicMock, patch
-        from PyQt6.QtWidgets import QWidget
+        from qtpy.QtWidgets import QWidget
         from ballontranslator.ui.mainwindow import MainWindow
 
         class DummyWindow(QWidget):

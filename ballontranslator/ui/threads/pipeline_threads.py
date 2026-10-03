@@ -392,7 +392,7 @@ class ModuleThread(QThread):
             )
             if self.pipeline_stop_event is not None:
                 self.pipeline_stop_event.set()
-        except LLMRequestStopped:
+        except (LLMRequestStopped, DownloadCancelled):
             LOGGER.info(f'{self.module_key} task stopped by user.')
         except Exception as e:
             create_error_dialog(e, self.tr('Module task failed.'), f'ModuleThreadFailed:{self.module_key}')
@@ -444,7 +444,7 @@ class InpaintThread(ModuleThread):
                 self.pipeline_stop_event.set()
             self.inpainting = False
             self.inpaint_failed.emit()
-        except LLMRequestStopped:
+        except (LLMRequestStopped, DownloadCancelled):
             LOGGER.info('Inpainting stopped by user.')
             self.inpainting = False
             self.inpaint_failed.emit()
@@ -1712,7 +1712,7 @@ class ImgtransThread(QThread):
             )
             self.requestStop()
             self._emit_pipeline_stopped_if_ready(imgtrans_running=False)
-        except LLMRequestStopped:
+        except (LLMRequestStopped, DownloadCancelled):
             LOGGER.info('Image translation task stopped by user.')
             self._emit_pipeline_stopped_if_ready(imgtrans_running=False)
         except Exception as e:

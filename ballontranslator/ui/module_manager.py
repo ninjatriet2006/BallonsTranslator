@@ -692,7 +692,11 @@ class ModuleManager(QObject):
         )
 
     def _show_module_prepare_failure(self, thread: ModuleThread):
-        if thread.last_error is None:
+        if (
+            thread.last_error is None
+            or isinstance(thread.last_error, DownloadCancelled)
+            or (hasattr(thread, 'cancel_event') and thread.cancel_event.is_set())
+        ):
             return
         msg = self.tr('Failed to set module ') + thread.last_set_module_name
         create_error_dialog(thread.last_error, msg, f'FailedSetModule:{thread.module_key}:{thread.last_set_module_name}')
@@ -815,7 +819,7 @@ class ModuleManager(QObject):
             lambda: self._startImgtransPipeline(
                 pages_to_process,
             ),
-            on_failure=lambda: self.imgtrans_pipeline_finished.emit() if shared.HEADLESS else None,
+            on_failure=lambda: self.imgtrans_pipeline_finished.emit(),
         )
 
     def _startImgtransPipeline(

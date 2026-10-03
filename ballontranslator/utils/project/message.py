@@ -13,6 +13,13 @@ def create_error_dialog(exception: Exception, error_msg: str = None, exception_t
         exception_type: Specify it to avoid errors dialog of the same type popup repeatedly 
     '''
 
+    # Suppress popup and error logging for intentional user cancellations
+    if exception is not None:
+        exc_type_name = getattr(exception.__class__, '__name__', '')
+        if exc_type_name in ('DownloadCancelled', 'LLMRequestStopped', 'CancelledError'):
+            LOGGER.info(f"Suppressed error dialog for cancelled operation: {exception}")
+            return
+
     if isinstance(exception, BaseException):
         detail_traceback = ''.join(traceback.format_exception(
             type(exception), exception, exception.__traceback__,

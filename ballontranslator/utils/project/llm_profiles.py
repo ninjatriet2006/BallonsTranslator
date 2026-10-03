@@ -839,6 +839,13 @@ def fetch_remote_models(
     if not base_url:
         raise ValueError("Base URL cannot be empty")
 
+    from ballontranslator.utils.project.key_pool import is_key_file, get_key_pool
+    if is_key_file(api_key):
+        pool = get_key_pool(api_key)
+        first_key = pool.get_next_key()
+        if first_key:
+            api_key = first_key
+
     candidates = get_candidate_model_endpoints(base_url, api_key)
     if not candidates:
         raise ValueError(f"Invalid Base URL: {base_url}")

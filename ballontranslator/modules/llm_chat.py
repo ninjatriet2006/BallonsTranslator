@@ -157,6 +157,8 @@ class LLMChatRequester:
         self.client_cache_key: Optional[
             Tuple[str, Optional[str], str]
         ] = None
+        self._clients_cache: Dict[Tuple[str, Optional[str], str], Any] = {}
+        self._clients_lock = threading.Lock()
         self.last_request_time = 0.0
         self.request_count_minute = 0
         self.minute_start_time = time.time()
@@ -209,7 +211,8 @@ class LLMChatRequester:
 
     @staticmethod
     def _api_key_for_profile(profile: LLMProfile) -> str:
-        api_key = resolve_api_key(profile).strip()
+        from ballontranslator.utils.project.key_pool import resolve_active_api_key
+        api_key = resolve_active_api_key(profile).strip()
         if profile.require_api_key and not api_key:
             raise LLMApiKeyRequiredError(profile.id, profile.name)
         return api_key
@@ -225,30 +228,44 @@ class LLMChatRequester:
             return self.dummy_api_key
         return api_key
 
-    def _initialize_client(self, profile: LLMProfile) -> Any:
-        api_key = self._client_api_key_for_profile(profile)
+    def _initialize_client(self, profile: LLMProfile, api_key: Optional[str] = None) -> Any:
+        if api_key is None:
+            api_key = self._client_api_key_for_profile(profile)
+        if not api_key:
+            api_key = self.dummy_api_key
         configured_base_url = str(profile.base_url or '').strip()
         base_url = _openai_sdk_base_url(configured_base_url) or None
-        proxy = str(self.get_param_value('proxy') or '')
+        proxy = str(self.get_param_value('proxy') or '') if hasattr(self, 'get_param_value') else ''
         cache_key = (api_key, base_url, proxy)
-        if self.client is not None and self.client_cache_key == cache_key:
-            return self.client
 
-        if configured_base_url and base_url != configured_base_url:
-            self.logger.warning(
-                f'LLM profile "{profile.name or profile.id}" Base URL ends '
-                f'with {_CHAT_COMPLETIONS_SUFFIX}; using its parent URL as '
-                'the OpenAI-compatible API base.'
+        if not hasattr(self, '_clients_cache'):
+            self._clients_cache = {}
+        if not hasattr(self, '_clients_lock'):
+            self._clients_lock = threading.Lock()
+
+        with self._clients_lock:
+            if cache_key in self._clients_cache:
+                self.client = self._clients_cache[cache_key]
+                self.client_cache_key = cache_key
+                return self.client
+
+            if configured_base_url and base_url != configured_base_url:
+                self.logger.warning(
+                    f'LLM profile "{profile.name or profile.id}" Base URL ends '
+                    f'with {_CHAT_COMPLETIONS_SUFFIX}; using its parent URL as '
+                    'the OpenAI-compatible API base.'
+                )
+
+            openai = self._openai_module()
+            client = openai.OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                http_client=self._http_client(proxy),
             )
-
-        openai = self._openai_module()
-        self.client = openai.OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            http_client=self._http_client(proxy),
-        )
-        self.client_cache_key = cache_key
-        return self.client
+            self._clients_cache[cache_key] = client
+            self.client = client
+            self.client_cache_key = cache_key
+            return client
 
     def _respect_delay(self, profile: Optional[LLMProfile] = None) -> None:
         with self._rate_lock:
@@ -323,6 +340,7 @@ class LLMChatRequester:
                 model=api_args.get('model'),
                 proxy=proxy,
                 timeout=timeout,
+                api_key=self._client_api_key_for_profile(profile),
             )
             return LLMChatResult(
                 content=res.content,
@@ -331,7 +349,8 @@ class LLMChatRequester:
             )
 
         openai = self._openai_module()
-        client = self._initialize_client(profile)
+        active_key = self._client_api_key_for_profile(profile)
+        client = self._initialize_client(profile, api_key=active_key)
         call_args = dict(api_args)
         if 'timeout' not in call_args:
             configured_timeout = None
@@ -359,6 +378,21 @@ class LLMChatRequester:
                 completion = client.chat.completions.create(**call_args)
                 break
             except getattr(openai, 'AuthenticationError') as error:
+                from ballontranslator.utils.project.key_pool import is_key_file, get_key_pool
+                raw_configured = resolve_api_key(profile).strip()
+                if is_key_file(raw_configured):
+                    pool = get_key_pool(raw_configured)
+                    if pool.count() > 1:
+                        pool.mark_rate_limited(active_key, cooldown_seconds=3600)
+                        next_key = pool.get_next_key()
+                        if next_key and next_key != active_key:
+                            self.logger.warning(
+                                f"Authentication failed for key in Keys File ({profile.name}). "
+                                f"Switching to next key in pool..."
+                            )
+                            active_key = next_key
+                            client = self._initialize_client(profile, api_key=active_key)
+                            continue
                 raise LLMApiKeyRequiredError(
                     profile.id, profile.name
                 ) from error
@@ -377,6 +411,28 @@ class LLMChatRequester:
                     or is_connection_error
                     or is_timeout_error
                 )
+
+                from ballontranslator.utils.project.key_pool import is_key_file, get_key_pool
+                raw_configured = resolve_api_key(profile).strip()
+                is_rate_limit = (
+                    status_code == 429
+                    or '429' in str(error)
+                    or 'ResourceExhausted' in str(error)
+                    or 'rate limit' in str(error).lower()
+                )
+                if is_rate_limit and is_key_file(raw_configured):
+                    pool = get_key_pool(raw_configured)
+                    if pool.count() > 1:
+                        pool.mark_rate_limited(active_key, cooldown_seconds=60)
+                        next_key = pool.get_next_key()
+                        if next_key and next_key != active_key:
+                            self.logger.warning(
+                                f"Rate limit (HTTP 429) on key in Keys File ({profile.name}). "
+                                f"Switching to next available key in pool..."
+                            )
+                            active_key = next_key
+                            client = self._initialize_client(profile, api_key=active_key)
+                            continue
 
                 if is_transient and attempt < max_transient_retries:
                     response = getattr(error, 'response', None)

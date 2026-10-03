@@ -78,6 +78,53 @@ class TestErrorDialog(unittest.TestCase):
             MainWindow.on_create_errdialog(win, "Second error")
             mock_qmsg.assert_not_called()
 
+    def test_create_error_dialog_suppresses_cancellations(self):
+        from ballontranslator.utils.system.download_util import DownloadCancelled
+        from ballontranslator.modules.llm_chat import LLMRequestStopped
+
+        with mock.patch('ballontranslator.utils.project.shared.create_errdialog_in_mainthread') as mock_err_dlg, \
+             mock.patch('ballontranslator.utils.project.message.LOGGER.error') as mock_log_err:
+            create_error_dialog(DownloadCancelled('Module preparation cancelled by user.'))
+            create_error_dialog(LLMRequestStopped('Stopped by user'))
+            mock_err_dlg.assert_not_called()
+            mock_log_err.assert_not_called()
+
+    def test_module_prepare_cancellation_suppresses_error_dialog(self):
+        import threading
+        from ballontranslator.ui.module_manager import ModuleManager
+        from ballontranslator.utils.system.download_util import DownloadCancelled
+
+        class MockProject:
+            def __init__(self):
+                self.pages = {}
+            def pagename2idx(self, name):
+                return 0
+
+        manager = ModuleManager(MockProject())
+
+        class DummyThread:
+            def __init__(self):
+                self.last_error = DownloadCancelled("Cancelled by user")
+                self.module_key = "inpainter"
+                self.last_set_module_name = "lama_large_512px"
+                self.cancel_event = threading.Event()
+
+        dummy_th = DummyThread()
+        with mock.patch('ballontranslator.ui.module_manager.create_error_dialog') as mock_dlg:
+            manager._show_module_prepare_failure(dummy_th)
+            mock_dlg.assert_not_called()
+
+            # Also if cancel_event is set with a generic exception
+            dummy_th.last_error = RuntimeError("Aborted")
+            dummy_th.cancel_event.set()
+            manager._show_module_prepare_failure(dummy_th)
+            mock_dlg.assert_not_called()
+
+            # Normal error without cancel_event set MUST call create_error_dialog
+            dummy_th.cancel_event.clear()
+            manager._show_module_prepare_failure(dummy_th)
+            mock_dlg.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()
