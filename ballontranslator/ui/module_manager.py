@@ -81,6 +81,7 @@ class ModuleManager(QObject):
     canvas_inpaint_failed = Signal()
     inpaint_th_finished = Signal()
 
+    imgtrans_pipeline_started = Signal()
     imgtrans_pipeline_finished = Signal()
     blktrans_pipeline_finished = Signal(int, list)
     page_trans_finished = Signal(int)
@@ -122,6 +123,12 @@ class ModuleManager(QObject):
 
     def clear_pipeline_issues(self):
         self._pipeline_issues.clear()
+        imgtrans_thread = getattr(self, 'imgtrans_thread', None)
+        if imgtrans_thread is not None and hasattr(imgtrans_thread, 'runtime_issues'):
+            imgtrans_thread.runtime_issues.clear()
+        translate_thread = getattr(self, 'translate_thread', None)
+        if translate_thread is not None and hasattr(translate_thread, 'runtime_issues'):
+            translate_thread.runtime_issues.clear()
         self.pipeline_issues_updated.emit(0)
 
     def setupThread(
@@ -743,6 +750,13 @@ class ModuleManager(QObject):
         if self.translate_thread.isRunning():
             self.translate_thread.quit()
 
+    def is_pipeline_running(self) -> bool:
+        return bool(
+            (hasattr(self, 'imgtrans_thread') and self.imgtrans_thread is not None and self.imgtrans_thread.isRunning())
+            or (hasattr(self, 'translate_thread') and self.translate_thread is not None and self.translate_thread.isRunning())
+            or self._module_preparation_running()
+        )
+
     def _module_preparation_running(self) -> bool:
         module_threads = [self.textdetect_thread, self.ocr_thread, self.translate_thread, self.inpaint_thread]
         package_running = self.package_install_thread is not None and self.package_install_thread.isRunning()
@@ -777,6 +791,11 @@ class ModuleManager(QObject):
         pages_to_process=None,
         render_only=False,
     ):
+        if self.is_pipeline_running():
+            LOGGER.warning('Image translation pipeline is already running.')
+            if hasattr(self, 'progress_msgbox') and self.progress_msgbox is not None:
+                self.progress_msgbox.show_fitted()
+            return
         _reset_llm_key_required_dialogs()
         if self.imgtrans_proj.is_empty:
             LOGGER.info('proj file is empty, nothing to do')
@@ -836,6 +855,7 @@ class ModuleManager(QObject):
         self.progress_msgbox.inpaint_bar.setVisible(cfg_module.enable_inpaint)
         self.progress_msgbox.zero_progress()
         self.progress_msgbox.show_fitted()
+        self.imgtrans_pipeline_started.emit()
         self.imgtrans_thread.runImgtransPipeline(
             self.imgtrans_proj,
             pages_to_process,
@@ -859,6 +879,11 @@ class ModuleManager(QObject):
         *,
         page_key: str = None,
     ):
+        if self.is_pipeline_running():
+            LOGGER.warning('Another translation pipeline is already running.')
+            if hasattr(self, 'progress_msgbox') and self.progress_msgbox is not None:
+                self.progress_msgbox.show_fitted()
+            return
         _reset_llm_key_required_dialogs()
         self.terminateRunningThread()
         required_modules = []
@@ -977,31 +1002,36 @@ class ModuleManager(QObject):
         return False
 
     def finishImgtransPipeline(self, force: bool = False):
+        imgtrans_thread = getattr(self, 'imgtrans_thread', None)
+        translate_thread = getattr(self, 'translate_thread', None)
+        if imgtrans_thread and imgtrans_thread.isStopRequested():
+            return
         if force or self.proj_finished():
             try:
                 self.progress_msgbox.hide()
-                start_time = getattr(self.imgtrans_thread, 'pipeline_start_time', None)
+                start_time = getattr(imgtrans_thread, 'pipeline_start_time', None) if imgtrans_thread else None
                 elapsed_str = f" in {time.time() - start_time:.1f}s" if start_time else ""
                 stats = []
-                if cfg_module.enable_detect:
-                    stats.append(f"Detect: {self.imgtrans_thread.detect_counter}")
-                if cfg_module.enable_ocr:
-                    stats.append(f"OCR: {self.imgtrans_thread.ocr_counter}")
-                if cfg_module.enable_translate:
+                if cfg_module.enable_detect and imgtrans_thread:
+                    stats.append(f"Detect: {imgtrans_thread.detect_counter}")
+                if cfg_module.enable_ocr and imgtrans_thread:
+                    stats.append(f"OCR: {imgtrans_thread.ocr_counter}")
+                if cfg_module.enable_translate and imgtrans_thread:
                     trans_count = (
-                        self.translate_thread.finished_counter
-                        if getattr(self.imgtrans_thread, 'parallel_trans', False)
-                        else self.imgtrans_thread.translate_counter
+                        translate_thread.finished_counter
+                        if getattr(imgtrans_thread, 'parallel_trans', False) and translate_thread
+                        else imgtrans_thread.translate_counter
                     )
                     stats.append(f"Translate: {trans_count}")
-                if cfg_module.enable_inpaint:
-                    stats.append(f"Inpaint: {self.imgtrans_thread.inpaint_counter}")
+                if cfg_module.enable_inpaint and imgtrans_thread:
+                    stats.append(f"Inpaint: {imgtrans_thread.inpaint_counter}")
                 stats_str = f" | Stats: {', '.join(stats)}" if stats else ""
-                LOGGER.stop(f"Translation pipeline completed: {self.imgtrans_thread.num_pages} page(s){elapsed_str}{stats_str}")
+                num_p = imgtrans_thread.num_pages if imgtrans_thread else 0
+                LOGGER.stop(f"Translation pipeline completed: {num_p} page(s){elapsed_str}{stats_str}")
             except Exception as e:
                 LOGGER.error(f"Error logging pipeline stats: {e}")
 
-            self._audit_and_update_issues()
+            self._audit_and_update_issues(include_auditor=True)
 
             try:
                 self.imgtrans_pipeline_finished.emit()
@@ -1009,42 +1039,56 @@ class ModuleManager(QObject):
                 LOGGER.error(f"Error emitting imgtrans_pipeline_finished: {e}")
     
     def on_imgtrans_thread_finished(self):
-        """Ensure cleanup and issue audit when the pipeline thread finishes."""
+        """Ensure cleanup and issue audit when the pipeline thread finishes normally."""
+        imgtrans_thread = getattr(self, 'imgtrans_thread', None)
+        if imgtrans_thread and imgtrans_thread.isStopRequested():
+            return
         self.finishImgtransPipeline(force=True)
 
     def on_imgtrans_thread_stopped(self):
-        """线程完成时确保关闭进度对话框"""
+        """Pipeline stopped by user: dismiss progress box and update only runtime issues."""
         try:
             self.progress_msgbox.hide()
         except Exception:
             pass
-        self._audit_and_update_issues()
+        self._audit_and_update_issues(include_auditor=False)
         try:
             self.imgtrans_pipeline_finished.emit()
         except Exception as e:
             LOGGER.error(f"Error emitting imgtrans_pipeline_finished on stop: {e}")
 
-    def _audit_and_update_issues(self):
+    def _audit_and_update_issues(self, include_auditor: bool = True):
         try:
-            enabled_stages = {
-                'detect': cfg_module.enable_detect,
-                'ocr': cfg_module.enable_ocr,
-                'translate': cfg_module.enable_translate,
-                'inpaint': cfg_module.enable_inpaint,
-            }
-            target_pages = getattr(self.imgtrans_thread, 'pages_to_process', None)
-            audited = StageAuditor.audit_project_pages(
-                self.imgtrans_proj,
-                target_pages=target_pages,
-                enabled_stages=enabled_stages,
-            )
-            runtime = getattr(self.imgtrans_thread, 'runtime_issues', [])
-            all_issues = list(runtime)
+            imgtrans_thread = getattr(self, 'imgtrans_thread', None)
+            translate_thread = getattr(self, 'translate_thread', None)
+            runtime = list(getattr(imgtrans_thread, 'runtime_issues', []))
+            trans_runtime = list(getattr(translate_thread, 'runtime_issues', []))
+            all_issues = runtime
             seen = {(issue.page_key, issue.stage) for issue in all_issues}
-            for ai in audited:
-                if (ai.page_key, ai.stage) not in seen:
-                    all_issues.append(ai)
-                    seen.add((ai.page_key, ai.stage))
+            for ti in trans_runtime:
+                if (ti.page_key, ti.stage) not in seen:
+                    all_issues.append(ti)
+                    seen.add((ti.page_key, ti.stage))
+
+            is_stopped = bool(imgtrans_thread and imgtrans_thread.isStopRequested())
+            if include_auditor and not is_stopped:
+                enabled_stages = {
+                    'detect': cfg_module.enable_detect,
+                    'ocr': cfg_module.enable_ocr,
+                    'translate': cfg_module.enable_translate,
+                    'inpaint': cfg_module.enable_inpaint,
+                }
+                target_pages = getattr(imgtrans_thread, 'pages_to_process', None)
+                audited = StageAuditor.audit_project_pages(
+                    self.imgtrans_proj,
+                    target_pages=target_pages,
+                    enabled_stages=enabled_stages,
+                )
+                for ai in audited:
+                    if (ai.page_key, ai.stage) not in seen:
+                        all_issues.append(ai)
+                        seen.add((ai.page_key, ai.stage))
+
             self._pipeline_issues = all_issues
             self.pipeline_issues_updated.emit(len(self._pipeline_issues))
         except Exception as e:
@@ -1139,6 +1183,9 @@ class ModuleManager(QObject):
 
         >>> manager.canvas_inpaint(request)  # doctest: +SKIP
         """
+        if self.is_pipeline_running():
+            LOGGER.warning('Cannot perform canvas inpaint while image translation pipeline is running.')
+            return
         # The page may change while this request waits for an older inference.
         self._pending_canvas_inpaint = {
             **inpaint_dict,

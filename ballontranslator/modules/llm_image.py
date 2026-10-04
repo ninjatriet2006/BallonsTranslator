@@ -183,6 +183,9 @@ def unletterbox_image(
     return cropped
 
 
+_REQUEST_CONTEXT = threading.local()
+
+
 class LLMImageRequester:
     """Issue optional-context image requests through one LLM profile.
 
@@ -205,6 +208,8 @@ class LLMImageRequester:
         self._image_request_policy = image_request_policy
         self.client = None
         self.client_cache_key = None
+        self._clients_cache: Dict[Any, Any] = {}
+        self._clients_lock = threading.Lock()
         self.stop_event = None
 
     def _request_param(self, name: str):
@@ -330,37 +335,62 @@ class LLMImageRequester:
             )
             return httpx.Client(**client_kwargs)
 
-    @staticmethod
-    def _api_key_for_profile(profile: LLMProfile) -> str:
+    @classmethod
+    def _api_key_for_profile(cls, profile: LLMProfile) -> str:
+        current_active = getattr(_REQUEST_CONTEXT, 'active_api_key', None)
+        if current_active:
+            return current_active
         from ballontranslator.utils.project.key_pool import resolve_active_api_key
         api_key = resolve_active_api_key(profile).strip()
         if profile.require_api_key and not api_key:
             raise LLMApiKeyRequiredError(profile.id, profile.name)
         return api_key
 
-    def _initialize_client(self, profile: LLMProfile):
-        api_key = self._api_key_for_profile(profile)
+    def _initialize_client(self, profile: LLMProfile, api_key: Optional[str] = None):
+        if api_key is None:
+            api_key = self._api_key_for_profile(profile)
         base_url = self._image_base_url(profile)
         proxy = self._request_param('proxy') or ''
         cache_key = (api_key, base_url, proxy, self._request_timeout())
-        if self.client is not None and self.client_cache_key == cache_key:
-            return self.client
-        if self.client is not None:
-            try:
-                self.client.close()
-            except Exception:
-                pass
-        self.client = self._http_client(proxy)
-        self.client_cache_key = cache_key
-        return self.client
+
+        if not hasattr(self, '_clients_cache'):
+            self._clients_cache = {}
+        if not hasattr(self, '_clients_lock'):
+            self._clients_lock = threading.Lock()
+
+        with self._clients_lock:
+            if cache_key in self._clients_cache:
+                self.client = self._clients_cache[cache_key]
+                self.client_cache_key = cache_key
+                return self.client
+
+            client = self._http_client(proxy)
+            self._clients_cache[cache_key] = client
+            self.client = client
+            self.client_cache_key = cache_key
+            return client
 
     def close(self) -> None:
-        if self.client is not None:
-            try:
-                self.client.close()
-            finally:
-                self.client = None
-                self.client_cache_key = None
+        if not hasattr(self, '_clients_lock'):
+            self._clients_lock = threading.Lock()
+        with self._clients_lock:
+            closed_clients = set()
+            if hasattr(self, '_clients_cache'):
+                for cl in list(self._clients_cache.values()):
+                    if cl not in closed_clients:
+                        try:
+                            cl.close()
+                        except Exception:
+                            pass
+                        closed_clients.add(cl)
+                self._clients_cache.clear()
+            if self.client is not None and self.client not in closed_clients:
+                try:
+                    self.client.close()
+                except Exception:
+                    pass
+            self.client = None
+            self.client_cache_key = None
 
     def _respect_delay(self) -> None:
         _LLM_IMAGE_THROTTLE.reserve(
@@ -760,7 +790,9 @@ class LLMImageRequester:
         """Return one generated RGB(A) image for optional input context."""
         if self.stop_event is not None and self.stop_event.is_set():
             raise LLMRequestStopped()
-        client = self._initialize_client(profile)
+        active_key = self._api_key_for_profile(profile)
+        _REQUEST_CONTEXT.active_api_key = active_key
+        client = self._initialize_client(profile, api_key=active_key)
         original_shape = None if image is None else image.shape[:2]
         pad_info = (0, 0, 0, 0)
         input_image = image
@@ -819,6 +851,7 @@ class LLMImageRequester:
                     )
             return np.ascontiguousarray(result.astype(np.uint8, copy=False))
         finally:
+            _REQUEST_CONTEXT.active_api_key = None
             if image_file is not None:
                 image_file.close()
 

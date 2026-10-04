@@ -170,6 +170,8 @@ class LLMProfile(Config):
     concurrency: int = 0
     request_delay: float = 0.0
     rpm_limit: int = 0
+    key_cooldown: float = 0.0
+    max_retry_wait: float = 0.0
 
     @classmethod
     def from_provider(cls, provider: str) -> "LLMProfile":

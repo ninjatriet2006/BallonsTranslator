@@ -499,6 +499,7 @@ class MainWindow(mainwindow_cls):
         )
 
         self.module_manager = module_manager = ModuleManager(self.imgtrans_proj)
+        module_manager.imgtrans_pipeline_started.connect(self.on_imgtrans_pipeline_started)
         module_manager.imgtrans_pipeline_finished.connect(self.on_imgtrans_pipeline_finished)
         module_manager.page_trans_finished.connect(self.on_pagtrans_finished)
         module_manager.page_stage_finished.connect(self.on_page_stage_finished)
@@ -2052,16 +2053,24 @@ class MainWindow(mainwindow_cls):
         )
         return True
 
+    def on_imgtrans_pipeline_started(self):
+        if hasattr(self, 'leftBar') and hasattr(self.leftBar, 'runImgtransBtn'):
+            self.leftBar.runImgtransBtn.setEnabled(False)
+            self.leftBar.runImgtransBtn.setToolTip(self.tr('Translation pipeline is running...'))
+
     def on_imgtrans_pipeline_finished(self):
+        if hasattr(self, 'leftBar') and hasattr(self.leftBar, 'runImgtransBtn'):
+            self.leftBar.runImgtransBtn.setEnabled(True)
+            self.leftBar.runImgtransBtn.setToolTip('{} (F5)'.format(self.tr('Run')))
         self.backup_blkstyles.clear()
         self._run_imgtrans_wo_textstyle_update = False
         self._render_only = False
         self._render_global_format = None
         if pcfg.module.empty_runcache and not shared.HEADLESS:
             self.module_manager.unload_all_models()
-        if shared.args.export_translation_txt:
+        if getattr(shared, 'args', None) and getattr(shared.args, 'export_translation_txt', False):
             self.on_export_txt('translation')
-        if shared.args.export_source_txt:
+        if getattr(shared, 'args', None) and getattr(shared.args, 'export_source_txt', False):
             self.on_export_txt('source')
         if shared.HEADLESS:
             self.run_next_dir()
@@ -2349,6 +2358,10 @@ class MainWindow(mainwindow_cls):
             self.set_display_lang(lang)
     
     def run_imgtrans(self):
+        if hasattr(self, 'module_manager') and self.module_manager is not None and self.module_manager.is_pipeline_running():
+            if hasattr(self.module_manager, 'progress_msgbox') and self.module_manager.progress_msgbox is not None:
+                self.module_manager.progress_msgbox.show_fitted()
+            return
         current_idx = self.pageList.currentIndex().row() if hasattr(self, 'pageList') else -1
         current_page = current_idx + 1 if current_idx >= 0 else 1
         dialog = RunPipelineDialog(
@@ -2407,6 +2420,10 @@ class MainWindow(mainwindow_cls):
         render_only=False,
         pages_to_process=None,
     ):
+        if hasattr(self, 'module_manager') and self.module_manager is not None and self.module_manager.is_pipeline_running():
+            if hasattr(self.module_manager, 'progress_msgbox') and self.module_manager.progress_msgbox is not None:
+                self.module_manager.progress_msgbox.show_fitted()
+            return
         self.backup_blkstyles.clear()
         self._render_only = render_only
         self._render_global_format = (

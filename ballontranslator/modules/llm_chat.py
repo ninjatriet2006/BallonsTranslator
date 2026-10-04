@@ -30,26 +30,26 @@ from ballontranslator.utils.project.config import pcfg
 TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
-def _parse_retry_after(response: Any, default: float) -> float:
-    """Parse HTTP Retry-After header as seconds or date, capped at 120s."""
+def _parse_retry_after(response: Any, default: float, max_wait: float = 60.0) -> float:
+    """Parse HTTP Retry-After header as seconds or date, capped at max_wait."""
     if response is None:
-        return default
+        return min(default, max_wait)
     headers = getattr(response, 'headers', None)
     if not headers:
-        return default
+        return min(default, max_wait)
     retry_header = headers.get('retry-after') or headers.get('Retry-After')
     if not retry_header:
-        return default
+        return min(default, max_wait)
     try:
         val = float(retry_header)
-        return max(0.5, min(val, 120.0))
+        return max(0.5, min(val, max_wait))
     except (ValueError, TypeError):
         try:
             target_time = email.utils.parsedate_to_datetime(retry_header).timestamp()
             diff = target_time - time.time()
-            return max(0.5, min(diff, 120.0))
+            return max(0.5, min(diff, max_wait))
         except Exception:
-            return default
+            return min(default, max_wait)
 
 
 OPENAI_MAX_TOKENS_MODELS = frozenset({
@@ -304,9 +304,10 @@ class LLMChatRequester:
                     self.request_count_minute = 0
                     self.minute_start_time = time.time()
 
+            effective_delay = max(delay, 0.1)
             time_since_last_request = current_time - self.last_request_time
-            if time_since_last_request < delay:
-                self._wait(delay - time_since_last_request)
+            if time_since_last_request < effective_delay:
+                self._wait(effective_delay - time_since_last_request)
 
             self.last_request_time = time.time()
             self.request_count_minute += 1
@@ -420,15 +421,24 @@ class LLMChatRequester:
                     or 'ResourceExhausted' in str(error)
                     or 'rate limit' in str(error).lower()
                 )
+
+                profile_cooldown = getattr(profile, 'key_cooldown', 0.0) if profile else 0.0
+                global_cooldown = getattr(pcfg.module, 'llm_key_cooldown', 60.0)
+                key_cooldown = profile_cooldown if profile_cooldown > 0 else global_cooldown
+
+                profile_max_wait = getattr(profile, 'max_retry_wait', 0.0) if profile else 0.0
+                global_max_wait = getattr(pcfg.module, 'llm_max_retry_wait', 60.0)
+                max_retry_wait = profile_max_wait if profile_max_wait > 0 else global_max_wait
+
                 if is_rate_limit and is_key_file(raw_configured):
                     pool = get_key_pool(raw_configured)
                     if pool.count() > 1:
-                        pool.mark_rate_limited(active_key, cooldown_seconds=60)
+                        pool.mark_rate_limited(active_key, cooldown_seconds=key_cooldown)
                         next_key = pool.get_next_key()
                         if next_key and next_key != active_key:
                             self.logger.warning(
                                 f"Rate limit (HTTP 429) on key in Keys File ({profile.name}). "
-                                f"Switching to next available key in pool..."
+                                f"Key cooldown: {key_cooldown:.0f}s. Switching to next available key in pool..."
                             )
                             active_key = next_key
                             client = self._initialize_client(profile, api_key=active_key)
@@ -437,12 +447,12 @@ class LLMChatRequester:
                 if is_transient and attempt < max_transient_retries:
                     response = getattr(error, 'response', None)
                     jitter = random.uniform(0.2, 1.0)
-                    default_wait = min(60.0, (base_backoff ** attempt) * 2.0 + jitter)
-                    wait_time = _parse_retry_after(response, default_wait)
+                    default_wait = min(max_retry_wait, (base_backoff ** attempt) * 2.0 + jitter)
+                    wait_time = _parse_retry_after(response, default_wait, max_wait=max_retry_wait)
                     status_desc = f"HTTP {status_code}" if status_code else type(error).__name__
                     self.logger.warning(
                         f"Transient error ({status_desc}) from LLM provider. "
-                        f"Retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_transient_retries})..."
+                        f"Retrying in {wait_time:.2f}s (max wait: {max_retry_wait:.0f}s, attempt {attempt + 1}/{max_transient_retries})..."
                     )
                     self._wait(wait_time)
                     continue

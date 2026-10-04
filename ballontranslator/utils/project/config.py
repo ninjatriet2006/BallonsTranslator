@@ -132,6 +132,8 @@ class ModuleConfig(Config):
     llm_ocr_threads: int = 2
     llm_inpaint_threads: int = 2
     llm_request_delay: float = 0.0
+    llm_key_cooldown: float = 60.0
+    llm_max_retry_wait: float = 60.0
     local_detect_threads: int = 1
     local_ocr_threads: int = 1
     local_translate_threads: int = 1
@@ -288,6 +290,16 @@ class ModuleConfig(Config):
             self.llm_request_delay = max(0.0, min(60.0, float(getattr(self, 'llm_request_delay', 0.0))))
         except Exception:
             self.llm_request_delay = 0.0
+
+        try:
+            self.llm_key_cooldown = max(1.0, min(3600.0, float(getattr(self, 'llm_key_cooldown', 60.0))))
+        except Exception:
+            self.llm_key_cooldown = 60.0
+
+        try:
+            self.llm_max_retry_wait = max(1.0, min(300.0, float(getattr(self, 'llm_max_retry_wait', 60.0))))
+        except Exception:
+            self.llm_max_retry_wait = 60.0
 
         try:
             self.local_detect_threads = max(1, int(getattr(self, 'local_detect_threads', getattr(self, 'local_threads', 1))))

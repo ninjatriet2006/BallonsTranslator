@@ -661,6 +661,42 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         llm_delay_layout.addWidget(self.llm_delay_spin)
         llm_threads_layout.addLayout(llm_delay_layout, 1, 1)
 
+        # 5. LLM Key 429 Cooldown
+        llm_cooldown_layout = QHBoxLayout()
+        llm_cooldown_layout.setContentsMargins(0, 0, 0, 0)
+        llm_cooldown_layout.setSpacing(8)
+        llm_cooldown_label = ConfigTextLabel(self.tr('Key 429 Cooldown (s):'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        llm_cooldown_tooltip = self.tr('Duration in seconds to put an API key on cooldown after receiving HTTP 429 / Rate Limit error.')
+        llm_cooldown_label.setToolTip(llm_cooldown_tooltip)
+        self.llm_key_cooldown_spin = QSpinBox(self)
+        self.llm_key_cooldown_spin.setObjectName('PipelineLLMKeyCooldownSpin')
+        self.llm_key_cooldown_spin.setRange(1, 3600)
+        self.llm_key_cooldown_spin.setSingleStep(5)
+        self.llm_key_cooldown_spin.setFixedWidth(CONFIG_SPINBOX_COMPACT)
+        self.llm_key_cooldown_spin.setToolTip(llm_cooldown_tooltip)
+        self.llm_key_cooldown_spin.valueChanged.connect(self.on_llm_key_cooldown_changed)
+        llm_cooldown_layout.addWidget(llm_cooldown_label)
+        llm_cooldown_layout.addWidget(self.llm_key_cooldown_spin)
+        llm_threads_layout.addLayout(llm_cooldown_layout, 2, 0)
+
+        # 6. LLM Max Retry Wait
+        llm_retry_wait_layout = QHBoxLayout()
+        llm_retry_wait_layout.setContentsMargins(0, 0, 0, 0)
+        llm_retry_wait_layout.setSpacing(8)
+        llm_retry_wait_label = ConfigTextLabel(self.tr('Max Retry Wait (s):'), CONFIG_FONTSIZE_CONTENT, QFont.Weight.Normal)
+        llm_retry_wait_tooltip = self.tr('Maximum seconds to wait on rate limit or Retry-After header before failing or switching keys.')
+        llm_retry_wait_label.setToolTip(llm_retry_wait_tooltip)
+        self.llm_max_retry_wait_spin = QSpinBox(self)
+        self.llm_max_retry_wait_spin.setObjectName('PipelineLLMMaxRetryWaitSpin')
+        self.llm_max_retry_wait_spin.setRange(1, 300)
+        self.llm_max_retry_wait_spin.setSingleStep(5)
+        self.llm_max_retry_wait_spin.setFixedWidth(CONFIG_SPINBOX_COMPACT)
+        self.llm_max_retry_wait_spin.setToolTip(llm_retry_wait_tooltip)
+        self.llm_max_retry_wait_spin.valueChanged.connect(self.on_llm_max_retry_wait_changed)
+        llm_retry_wait_layout.addWidget(llm_retry_wait_label)
+        llm_retry_wait_layout.addWidget(self.llm_max_retry_wait_spin)
+        llm_threads_layout.addLayout(llm_retry_wait_layout, 2, 1)
+
         pipeline_options_layout.addWidget(llm_threads_grid_widget)
 
         # Local GPU Compute Grid (2x2)
@@ -1383,6 +1419,14 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         pcfg.module.llm_request_delay = val
         self.save_config.emit()
 
+    def on_llm_key_cooldown_changed(self, val: int):
+        pcfg.module.llm_key_cooldown = float(val)
+        self.save_config.emit()
+
+    def on_llm_max_retry_wait_changed(self, val: int):
+        pcfg.module.llm_max_retry_wait = float(val)
+        self.save_config.emit()
+
     def on_local_detect_threads_changed(self, val: int):
         pcfg.module.local_detect_threads = val
         self.save_config.emit()
@@ -1882,6 +1926,8 @@ class ConfigPanel(OutsideClickFramelessMixin, FramelessWindow):
         self.llm_ocr_threads_spin.setValue(getattr(pcfg.module, 'llm_ocr_threads', 2))
         self.llm_inpaint_threads_spin.setValue(getattr(pcfg.module, 'llm_inpaint_threads', 2))
         self.llm_delay_spin.setValue(getattr(pcfg.module, 'llm_request_delay', 0.0))
+        self.llm_key_cooldown_spin.setValue(int(getattr(pcfg.module, 'llm_key_cooldown', 60.0)))
+        self.llm_max_retry_wait_spin.setValue(int(getattr(pcfg.module, 'llm_max_retry_wait', 60.0)))
         self.local_detect_threads_spin.setValue(getattr(pcfg.module, 'local_detect_threads', 1))
         self.local_ocr_threads_spin.setValue(getattr(pcfg.module, 'local_ocr_threads', 1))
         self.local_translate_threads_spin.setValue(getattr(pcfg.module, 'local_translate_threads', 1))

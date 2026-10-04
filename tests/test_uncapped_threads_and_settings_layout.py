@@ -62,5 +62,22 @@ class UncappedThreadsAndSettingsLayoutTests(unittest.TestCase):
         self.assertIn('automatically detect the source language', prompt)
         self.assertIn('Vietnamese', prompt)
 
+    def test_config_panel_key_cooldown_and_max_retry_wait(self):
+        panel = ConfigPanel()
+        self.assertEqual(panel.llm_key_cooldown_spin.maximum(), 3600)
+        self.assertEqual(panel.llm_key_cooldown_spin.minimum(), 1)
+        self.assertEqual(panel.llm_max_retry_wait_spin.maximum(), 300)
+        self.assertEqual(panel.llm_max_retry_wait_spin.minimum(), 1)
+
+        # Test changing values updates pcfg.module
+        panel.llm_key_cooldown_spin.setValue(45)
+        self.assertEqual(pcfg.module.llm_key_cooldown, 45.0)
+
+        panel.llm_max_retry_wait_spin.setValue(30)
+        self.assertEqual(pcfg.module.llm_max_retry_wait, 30.0)
+
+        panel.deleteLater()
+
 if __name__ == '__main__':
     unittest.main()
+

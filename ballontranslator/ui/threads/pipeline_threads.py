@@ -494,6 +494,7 @@ class TranslateThread(ModuleThread):
         super().__init__('translator', TRANSLATORS, *args, **kwargs)
         self.translator: BaseTranslator = self.module
         self._queue_lock = threading.Lock()
+        self.runtime_issues: List[StageIssue] = []
 
     def _set_translator(self, translator: str):
         
@@ -640,6 +641,15 @@ class TranslateThread(ModuleThread):
             LOGGER.stop(f"[Stop][Translator][{page_num}] Translation completed")
         except LLMUserActionRequiredError as e:
             success = False
+            page_idx = project.pagename2idx(page_key) if hasattr(project, 'pagename2idx') else -1
+            if not any(iss.page_key == page_key and iss.stage == 'translate' for iss in self.runtime_issues):
+                self.runtime_issues.append(StageIssue(
+                    page_key=page_key,
+                    stage='translate',
+                    error_type='stage_failed',
+                    message=str(e),
+                    page_index=page_idx,
+                ))
             _show_llm_user_action_required_dialog(
                 e,
                 self.tr('Translation Failed.'),
@@ -654,6 +664,16 @@ class TranslateThread(ModuleThread):
             LOGGER.info('Translation stopped by user.')
         except Exception as e:
             success = False
+            page_idx = project.pagename2idx(page_key) if hasattr(project, 'pagename2idx') else -1
+            err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+            if not any(iss.page_key == page_key and iss.stage == 'translate' for iss in self.runtime_issues):
+                self.runtime_issues.append(StageIssue(
+                    page_key=page_key,
+                    stage='translate',
+                    error_type=err_type,
+                    message=str(e),
+                    page_index=page_idx,
+                ))
             _create_page_error_dialog(
                 e,
                 self.tr('Translation Failed.'),
@@ -666,6 +686,7 @@ class TranslateThread(ModuleThread):
     def initImgtransPipeline(self, proj: ProjImgTrans, stop_event: threading.Event = None):
         super().initImgtransPipeline(proj, stop_event)
         self.error_counter = 0
+        self.runtime_issues = []
         with self._queue_lock:
             self.pipeline_pagekey_queue.clear()
 
@@ -680,6 +701,16 @@ class TranslateThread(ModuleThread):
 
     def _handle_translate_error(self, e: Exception, page_key: str):
         self.error_counter += 1
+        page_idx = self.imgtrans_proj.pagename2idx(page_key) if hasattr(self.imgtrans_proj, 'pagename2idx') else -1
+        err_type = 'safety_refusal' if is_safety_refusal_error(e) else 'stage_failed'
+        if not any(iss.page_key == page_key and iss.stage == 'translate' for iss in self.runtime_issues):
+            self.runtime_issues.append(StageIssue(
+                page_key=page_key,
+                stage='translate',
+                error_type=err_type,
+                message=str(e),
+                page_index=page_idx,
+            ))
         if pcfg.module.pipeline_fault_tolerant:
             LOGGER.warning(f"Translation failed for {page_key}: {e}")
             return
@@ -755,8 +786,9 @@ class TranslateThread(ModuleThread):
                 self.finished_counter += 1
                 self.progress_changed.emit(self.finished_counter, self.error_counter)
 
-                if not self.pipeline_finished() and delay > 0:
-                    stop_event.wait(delay)
+                cooldown = delay if delay > 0 else 0.1
+                if not self.pipeline_finished():
+                    stop_event.wait(cooldown)
             return
 
         active_futures = {}
@@ -775,13 +807,16 @@ class TranslateThread(ModuleThread):
                     break
 
                 # Dispatch jobs while queue has items and capacity remains
+                pages_to_submit = []
                 with self._queue_lock:
-                    while len(active_futures) < max_workers and len(self.pipeline_pagekey_queue) > 0:
-                        next_page_key = self.pipeline_pagekey_queue.pop(0)
-                        fut = executor.submit(translate_worker, next_page_key)
-                        active_futures[fut] = next_page_key
-                        if delay > 0:
-                            stop_event.wait(delay)
+                    while (len(active_futures) + len(pages_to_submit)) < max_workers and len(self.pipeline_pagekey_queue) > 0:
+                        pages_to_submit.append(self.pipeline_pagekey_queue.pop(0))
+
+                for next_page_key in pages_to_submit:
+                    fut = executor.submit(translate_worker, next_page_key)
+                    active_futures[fut] = next_page_key
+                    cooldown = delay if delay > 0 else 0.1
+                    stop_event.wait(cooldown)
 
                 if not active_futures and len(self.pipeline_pagekey_queue) == 0:
                     if self.pipeline_finished():
